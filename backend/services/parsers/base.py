@@ -38,6 +38,12 @@ class BaseParser(ABC):
         return indices
 
     @staticmethod
+    def _safe_cell(row: list, idx: int) -> Optional[str]:
+        if 0 <= idx < len(row):
+            return row[idx]
+        return None
+
+    @staticmethod
     def _parse_amount_cell(cell: Optional[str]) -> Optional[float]:
         if not cell:
             return None

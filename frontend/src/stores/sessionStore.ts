@@ -8,12 +8,14 @@ interface SessionState {
   tagSummary: TagSummary | null
   isLoading: boolean
   isProcessing: boolean
+  processingError: string | null
+  clearProcessingError: () => void
   loadSessions: () => Promise<void>
   loadTransactions: (sessionId: number) => Promise<void>
   loadTagSummary: (sessionId: number) => Promise<void>
   setCurrentSession: (session: AuditSession | null) => void
   processFiles: (
-    pdf: File,
+    pdf: File | File[],
     clientList: File,
     threshold: number,
     options?: {
@@ -36,6 +38,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   tagSummary: null,
   isLoading: false,
   isProcessing: false,
+  processingError: null,
+  clearProcessingError: () => set({ processingError: null }),
   loadSessions: async () => {
     set({ isLoading: true })
     try {
@@ -74,11 +78,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       get().loadTagSummary(session.id)
     }
   },
-  processFiles: async (pdf, clientList, threshold, options) => {
+  processFiles: async (pdfFiles, clientList, threshold, options) => {
     set({ isProcessing: true })
     try {
       const { parseFiles } = await import('../lib/api')
-      const res = await parseFiles(pdf, clientList, threshold, options)
+      const pdfArr = Array.isArray(pdfFiles) ? pdfFiles : [pdfFiles]
+      const res = await parseFiles(pdfArr, clientList, threshold, options)
       const sessionId = res.data.session_id
       await get().loadSessions()
       const session = get().sessions.find((s) => s.id === sessionId)
@@ -87,9 +92,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }
       set({ isProcessing: false })
       return sessionId
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to process files:', e)
-      set({ isProcessing: false })
+      const msg = e?.response?.data?.detail || e?.message || 'Processing failed. Check the PDF is valid and not encrypted.'
+      set({ isProcessing: false, processingError: msg })
       return null
     }
   },

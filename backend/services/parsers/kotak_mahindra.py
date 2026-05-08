@@ -72,7 +72,8 @@ class KotakMahindraParser(BaseParser):
         return transactions
 
     def _parse_column_values(self, row: List[str], col_idx: int) -> List[str]:
-        vals = str(row[col_idx] or "").split("\n")
+        cell = self._safe_cell(row, col_idx)
+        vals = str(cell or "").split("\n")
         return [v.strip() for v in vals if v.strip()]
 
     def _extract_transactions(self, row: List[str], col_indices: Dict[str, int],
@@ -102,7 +103,8 @@ class KotakMahindraParser(BaseParser):
             if amt is not None:
                 deposits.append(amt)
 
-        narrations_raw = str(row[col_indices["narration"]] or "").split("\n")
+        narration_cell = self._safe_cell(row, col_indices["narration"])
+        narrations_raw = str(narration_cell or "").split("\n")
 
         n = min(len(dates), len(balances))
         if n == 0:

@@ -6,7 +6,7 @@ import { getParsers } from '../lib/api'
 
 interface FileDropZoneProps {
   onFilesSelected: (
-    pdf: File,
+    pdf: File | File[],
     clientList: File,
     threshold: number,
     options: {
@@ -71,7 +71,7 @@ function bestNameColumnMatch(headers: string[]): string | null {
 }
 
 export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isProcessing, brokers = [] }) => {
-  const [pdfFile, setPdfFile] = useState<File | null>(null)
+  const [pdfFiles, setPdfFiles] = useState<File[]>([])
   const [clientListFile, setClientListFile] = useState<File | null>(null)
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -141,7 +141,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
         const ext = clientResult.name.endsWith('.csv') ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         const clientBlob = await fetch(`data:${ext};base64,${clientResult.data}`).then((r) => r.blob())
         const clientFile = new File([clientBlob], clientResult.name, { type: ext })
-        setPdfFile(pdfFile)
+        setPdfFiles([pdfFile])
         setClientListFile(clientFile)
         setShowPassword(false)
         setPassword('')
@@ -243,14 +243,15 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
     return () => { cancelled = true }
   }, [clientListFile, apCodeColumn, sheetName, apCodeEnabled, excelWorkbook])
 
-  // Detect if PDF is encrypted
+  // Detect if first PDF is encrypted
   useEffect(() => {
-    if (!pdfFile) {
+    if (pdfFiles.length === 0) {
       setIsEncrypted(false)
       setShowPassword(false)
       return
     }
-    const blob = pdfFile.slice(Math.max(0, pdfFile.size - 8192))
+    const f = pdfFiles[0]
+    const blob = f.slice(Math.max(0, f.size - 8192))
     const reader = new FileReader()
     reader.onload = (e) => {
       const text = e.target?.result as string
@@ -259,7 +260,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
       if (encrypted) setShowPassword(true)
     }
     reader.readAsText(blob)
-  }, [pdfFile])
+  }, [pdfFiles])
 
   // Close broker dropdown on outside click
   useEffect(() => {
@@ -344,9 +345,9 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
   }, [clientListFile])
 
   const onDropPdf = useCallback((acceptedFiles: File[]) => {
-    const file = acceptedFiles[0]
-    if (file && (file.type === 'application/pdf' || file.name.endsWith('.pdf'))) {
-      setPdfFile(file)
+    const valid = acceptedFiles.filter(f => f.type === 'application/pdf' || f.name.endsWith('.pdf'))
+    if (valid.length > 0) {
+      setPdfFiles(prev => [...prev, ...valid])
     }
   }, [])
 
@@ -367,7 +368,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
   const pdfDropzone = useDropzone({
     onDrop: onDropPdf,
     accept: { 'application/pdf': ['.pdf'] },
-    multiple: false
+    multiple: true
   })
 
   const clientListDropzone = useDropzone({
@@ -381,7 +382,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
   })
 
   const handleProcess = () => {
-    if (pdfFile && clientListFile) {
+    if (pdfFiles.length > 0 && clientListFile) {
       const options: Parameters<typeof onFilesSelected>[3] = {
         password: password || undefined,
         excludedBrokers: excludedBrokers.size > 0 ? Array.from(excludedBrokers) : undefined,
@@ -394,11 +395,11 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
       if (nameColumn.trim()) {
         options.nameColumn = nameColumn.trim()
       }
-      onFilesSelected(pdfFile, clientListFile, threshold, options)
+      onFilesSelected(pdfFiles, clientListFile, threshold, options)
     }
   }
 
-  const isReady = pdfFile && clientListFile && !isProcessing && nameColumn.trim().length > 0
+  const isReady = pdfFiles.length > 0 && clientListFile && !isProcessing && nameColumn.trim().length > 0
 
   const getClientListLabel = (file: File) => {
     if (file.name.endsWith('.csv')) return 'CSV'
@@ -434,7 +435,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
                   {files.map((filePath) => {
                     const name = filePath.split('/').pop() || filePath.split('\\').pop() || filePath
                     const isLoading = loadingExample === filePath
-                    const isActive = pdfFile?.name === name
+                    const isActive = pdfFiles.some(f => f.name === name)
                     return (
                       <button
                         key={filePath}
@@ -474,9 +475,9 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
         >
           <input {...pdfDropzone.getInputProps()} />
           <p className="text-sm font-medium text-[var(--text-primary)]">
-            {pdfDropzone.isDragActive ? 'Drop PDF here' : 'Bank Statement'}
+            {pdfDropzone.isDragActive ? 'Drop PDFs here' : pdfFiles.length > 0 ? `${pdfFiles.length} PDF${pdfFiles.length > 1 ? 's' : ''} selected` : 'Bank Statement'}
           </p>
-          <p className="text-xs text-[var(--text-tertiary)] mt-1">PDF only</p>
+          <p className="text-xs text-[var(--text-tertiary)] mt-1">PDF only (multiple allowed)</p>
         </div>
 
         <div
@@ -496,16 +497,16 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
       </div>
 
       {/* File list */}
-      {(pdfFile || clientListFile) && (
+      {(pdfFiles.length > 0 || clientListFile) && (
         <div className="space-y-2">
-          {pdfFile && (
-            <div className="flex items-center gap-3 py-2">
+          {pdfFiles.map((f, i) => (
+            <div key={i} className="flex items-center gap-3 py-2">
               <FileText className="h-4 w-4 text-[var(--danger)] shrink-0" strokeWidth={1.5} />
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-[var(--text-primary)] truncate">{pdfFile.name}</p>
-                <p className="text-xs text-[var(--text-tertiary)]">{formatFileSize(pdfFile.size)}</p>
+                <p className="text-sm font-medium text-[var(--text-primary)] truncate">{f.name}</p>
+                <p className="text-xs text-[var(--text-tertiary)]">{formatFileSize(f.size)}</p>
               </div>
-              {isEncrypted && (
+              {i === 0 && isEncrypted && (
                 <button
                   onClick={() => setShowPassword(!showPassword)}
                   className={`p-1.5 rounded-[var(--radius-sm)] transition-colors duration-150 ${showPassword ? 'text-[var(--primary)]' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'}`}
@@ -515,15 +516,19 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
                 </button>
               )}
               <button
-                onClick={() => { setPdfFile(null); setPassword(''); setShowPassword(false); setIsEncrypted(false) }}
+                onClick={() => {
+                  const next = pdfFiles.filter((_, j) => j !== i)
+                  setPdfFiles(next)
+                  if (next.length === 0) { setPassword(''); setShowPassword(false); setIsEncrypted(false) }
+                }}
                 className="p-1 text-[var(--text-tertiary)] hover:text-[var(--danger)] transition-colors duration-150"
               >
                 <X className="h-3.5 w-3.5" strokeWidth={2} />
               </button>
             </div>
-          )}
+          ))}
 
-          {showPassword && pdfFile && (
+          {showPassword && pdfFiles.length > 0 && (
             <input
               type="password"
               placeholder="Enter PDF password"

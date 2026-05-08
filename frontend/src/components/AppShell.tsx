@@ -70,6 +70,8 @@ export const AppShell: React.FC = () => {
     tagSummary,
     isLoading,
     isProcessing,
+    processingError,
+    clearProcessingError,
     loadSessions,
     setCurrentSession,
     processFiles,
@@ -135,7 +137,7 @@ export const AppShell: React.FC = () => {
   }, [handleGoHome])
 
   const handleFilesSelected = async (
-    pdf: File,
+    pdfFiles: File | File[],
     clientList: File,
     threshold: number,
     options: {
@@ -147,14 +149,8 @@ export const AppShell: React.FC = () => {
       bankName?: string
     }
   ) => {
-    const sessionId = await processFiles(pdf, clientList, threshold, options)
-    if (sessionId) {
-      await loadSessions()
-      const session = sessions.find((s) => s.id === sessionId)
-      if (session) {
-        setCurrentSession(session)
-      }
-    }
+    const pdfArr = Array.isArray(pdfFiles) ? pdfFiles : [pdfFiles]
+    await processFiles(pdfArr, clientList, threshold, options)
   }
 
   const handleRemoveTag = async (tagId: number) => {
@@ -345,6 +341,18 @@ export const AppShell: React.FC = () => {
                 <p className="text-sm text-[var(--text-secondary)] mt-1 mb-8">
                   Upload a bank statement and a client list. Set a threshold to flag suspicious transactions for this audit.
                 </p>
+                {processingError && (
+                  <div className="mb-6 p-3 bg-[var(--danger-subtle)] border border-[var(--danger)]/30 rounded-[var(--radius-md)] flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-[var(--danger)] shrink-0 mt-0.5" strokeWidth={2} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-[var(--danger)]">Processing failed</p>
+                      <p className="text-xs text-[var(--text-secondary)] mt-0.5">{processingError}</p>
+                    </div>
+                    <button onClick={clearProcessingError} className="p-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
+                      <X className="h-3.5 w-3.5" strokeWidth={2} />
+                    </button>
+                  </div>
+                )}
                 <FileDropZone onFilesSelected={handleFilesSelected} isProcessing={isProcessing} brokers={brokers} />
               </div>
             </div>

@@ -14,7 +14,8 @@ class PDFService:
     def extract_text(self, pdf_path: str, password: Optional[str] = None) -> List[Dict[str, Any]]:
         """Extract text and metadata from all pages."""
         doc = fitz.open(pdf_path)
-        if doc.is_encrypted and password:
+        is_encrypted = doc.is_encrypted
+        if is_encrypted and password:
             doc.authenticate(password)
         
         pages = []
@@ -22,9 +23,12 @@ class PDFService:
             page = doc[page_num]
             text = page.get_text()
             
-            # If page has no text, try OCR
+            # Skip slow OCR if page is encrypted without password
             if not text.strip():
-                text = self._ocr_page(page)
+                if is_encrypted and not password:
+                    text = "[ENCRYPTED — provide password to extract text]"
+                else:
+                    text = self._ocr_page(page)
             
             pages.append({
                 "page_number": page_num + 1,
@@ -49,14 +53,17 @@ class PDFService:
     def extract_tables(self, pdf_path: str, password: Optional[str] = None) -> List[Dict[str, Any]]:
         """Extract tables from PDF using pdfplumber."""
         tables = []
-        with pdfplumber.open(pdf_path, password=password) as pdf:
-            for page_num, page in enumerate(pdf.pages):
-                page_tables = page.extract_tables()
-                for table in page_tables:
-                    tables.append({
-                        "page_number": page_num + 1,
-                        "data": table
-                    })
+        try:
+            with pdfplumber.open(pdf_path, password=password) as pdf:
+                for page_num, page in enumerate(pdf.pages):
+                    page_tables = page.extract_tables()
+                    for table in page_tables:
+                        tables.append({
+                            "page_number": page_num + 1,
+                            "data": table
+                        })
+        except Exception as e:
+            print(f"[PDFService] Table extraction failed: {e}")
         return tables
     
     def parse_transactions(self, pdf_path: str, password: Optional[str] = None, 
@@ -73,12 +80,21 @@ class PDFService:
         if not parser:
             parser = registry.detect(tables, pages)
 
-        transactions = parser.parse(tables, pages)
+        try:
+            transactions = parser.parse(tables, pages)
 
-        # Fallback to generic if a specialized parser returned nothing
-        if not transactions and parser.name != "generic":
+            # Fallback to generic if a specialized parser returned nothing
+            if not transactions and parser.name != "generic":
+                generic = registry.get_by_name("generic")
+                transactions = generic.parse(tables, pages)
+        except Exception as e:
+            print(f"[PDFService] Parser failed: {e}")
             generic = registry.get_by_name("generic")
-            transactions = generic.parse(tables, pages)
+            try:
+                transactions = generic.parse(tables, pages)
+            except Exception as e2:
+                print(f"[PDFService] Generic parser also failed: {e2}")
+                transactions = []
 
         return transactions
 

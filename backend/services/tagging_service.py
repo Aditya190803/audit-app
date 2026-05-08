@@ -13,6 +13,46 @@ class TaggingService:
         self.config = ConfigService(db)
         self.fuzzy = FuzzyService(threshold=self.config.get_fuzzy_threshold())
     
+    @staticmethod
+    def _normalize_phone(phone: str) -> str | None:
+        digits = re.sub(r'\D', '', phone)
+        if len(digits) == 10:
+            return digits
+        if len(digits) == 11 and digits.startswith('0'):
+            return digits[1:]
+        if len(digits) == 12 and digits.startswith('91'):
+            return digits[2:]
+        if len(digits) > 10:
+            return digits[-10:]
+        return None
+
+    @staticmethod
+    def _build_phone_map(clients: List[Dict[str, Any]]) -> Dict[str, str]:
+        phone_map = {}
+        for c in clients:
+            raw = c.get('raw_data', {})
+            for key, val in raw.items():
+                k = str(key).lower().strip()
+                v = str(val).strip()
+                if any(kw in k for kw in ['phone', 'mobile', 'cell', 'telephone', 'contact_no', 'contact']):
+                    if v and v.lower() not in ('nan', '', 'none', 'null'):
+                        normalized = TaggingService._normalize_phone(v)
+                        if normalized:
+                            phone_map[normalized] = c['name']
+        return phone_map
+
+    @staticmethod
+    def _extract_phone_candidates(text: str) -> List[str]:
+        if not text:
+            return []
+        candidates = re.findall(r'\b\d{10,15}\b', re.sub(r'\D', ' ', text))
+        result = set()
+        for c in candidates:
+            normalized = TaggingService._normalize_phone(c)
+            if normalized:
+                result.add(normalized)
+        return list(result)
+    
     def auto_tag_session(self, session_id: int, clients: List[Dict[str, Any]]) -> List[Tag]:
         """Auto-tag all transactions in a session."""
         transactions = self.db.query(Transaction).filter(Transaction.session_id == session_id).all()
@@ -32,6 +72,9 @@ class TaggingService:
         recurring_window = int(self.config.get("recurring_days_window") or 30)
         suspicious_keywords = self.config.get("suspicious_keywords") or []
         
+        # Build phone number map from client list (exact match only, no fuzzy)
+        phone_map = self._build_phone_map(clients)
+        
         # Clear existing auto-tags
         self.db.query(Tag).filter(
             Tag.transaction_id.in_([t.id for t in transactions]),
@@ -45,43 +88,10 @@ class TaggingService:
         
         for tx in transactions:
             party_text = tx.party_name or ""
-            full_text = f"{party_text} {tx.description or ''}"
+            desc_text = tx.description or ""
+            full_text = f"{party_text} {desc_text}"
             
-            # 1. Client matching — search party_name first, then full description
-            client_matches = self.fuzzy.match_client_names(party_text, clients, alias_list)
-            if not client_matches:
-                client_matches = self.fuzzy.match_client_names(full_text, clients, alias_list)
-            for match in client_matches:
-                if match["score"] >= self.config.get_fuzzy_threshold():
-                    tag = Tag(
-                        transaction_id=tx.id,
-                        tag_type="client",
-                        confidence=match["score"],
-                        reason=f"Fuzzy match: '{match['original']}' (score: {match['score']})",
-                        source="auto",
-                        is_manual=False
-                    )
-                    new_tags.append(tag)
-                    self.db.add(tag)
-            
-            # 2. Broker matching — search party_name first, then full description
-            broker_matches = self.fuzzy.match_broker_names(party_text, broker_names, exclusions)
-            if not broker_matches:
-                broker_matches = self.fuzzy.match_broker_names(full_text, broker_names, exclusions)
-            for match in broker_matches:
-                if match["score"] >= self.config.get_fuzzy_threshold():
-                    tag = Tag(
-                        transaction_id=tx.id,
-                        tag_type="broker",
-                        confidence=match["score"],
-                        reason=f"Broker match: '{match['original']}' (score: {match['score']})",
-                        source="auto",
-                        is_manual=False
-                    )
-                    new_tags.append(tag)
-                    self.db.add(tag)
-            
-            # 3. Suspicious detection
+            # --- Check suspicious FIRST (if suspicious, skip client/broker) ---
             is_suspicious = False
             reasons = []
             
@@ -90,15 +100,15 @@ class TaggingService:
                 is_suspicious = True
                 reasons.append(f"Amount {tx.amount} exceeds threshold {threshold}")
             
-            # Recurring with no useful remark
-            if tx.id in recurring_map and not tx.description:
+            # Recurring transaction to same party
+            if tx.id in recurring_map:
                 is_suspicious = True
-                reasons.append("Recurring transaction with empty remark")
+                reasons.append("Recurring transaction to same party")
             
-            # Suspicious keywords
-            desc_lower = (tx.description or "").lower()
+            # Suspicious keywords in full text (party_name + description)
+            full_text_lower = full_text.lower()
             for keyword in suspicious_keywords:
-                if keyword.lower() in desc_lower:
+                if keyword.lower() in full_text_lower:
                     is_suspicious = True
                     reasons.append(f"Contains suspicious keyword: '{keyword}'")
             
@@ -113,6 +123,52 @@ class TaggingService:
                 )
                 new_tags.append(tag)
                 self.db.add(tag)
+                continue  # Skip client/broker tagging for suspicious transactions
+            
+            # --- 1. Client matching — fuzzy name + exact phone ---
+            client_matches = self.fuzzy.match_client_names(full_text, clients, alias_list)
+            for match in client_matches:
+                if match["score"] >= self.config.get_fuzzy_threshold():
+                    tag = Tag(
+                        transaction_id=tx.id,
+                        tag_type="client",
+                        confidence=match["score"],
+                        reason=f"Fuzzy match: '{match['original']}' (score: {match['score']})",
+                        source="auto",
+                        is_manual=False
+                    )
+                    new_tags.append(tag)
+                    self.db.add(tag)
+            
+            # Phone number exact match
+            phone_candidates = self._extract_phone_candidates(full_text)
+            for phone in phone_candidates:
+                if phone in phone_map:
+                    tag = Tag(
+                        transaction_id=tx.id,
+                        tag_type="client",
+                        confidence=1.0,
+                        reason=f"Phone match: {phone} -> {phone_map[phone]}",
+                        source="auto",
+                        is_manual=False
+                    )
+                    new_tags.append(tag)
+                    self.db.add(tag)
+            
+            # --- 2. Broker matching ---
+            broker_matches = self.fuzzy.match_broker_names(full_text, broker_names, exclusions)
+            for match in broker_matches:
+                if match["score"] >= self.config.get_fuzzy_threshold():
+                    tag = Tag(
+                        transaction_id=tx.id,
+                        tag_type="broker",
+                        confidence=match["score"],
+                        reason=f"Broker match: '{match['original']}' (score: {match['score']})",
+                        source="auto",
+                        is_manual=False
+                    )
+                    new_tags.append(tag)
+                    self.db.add(tag)
         
         self.db.commit()
         

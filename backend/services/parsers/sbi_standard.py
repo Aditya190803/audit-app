@@ -84,12 +84,14 @@ class SBIStandardParser(BaseParser):
         description = None
 
         if "date" in col_indices:
-            cell = str(row[col_indices["date"]] or "").strip()
-            if date_pattern.search(cell):
-                date = cell
+            cell = self._safe_cell(row, col_indices["date"])
+            if cell and date_pattern.search(str(cell)):
+                date = str(cell)
 
-        dr_amount = self._parse_amount_cell(row[col_indices["debit"]]) if "debit" in col_indices else None
-        cr_amount = self._parse_amount_cell(row[col_indices["credit"]]) if "credit" in col_indices else None
+        dr_idx = col_indices.get("debit")
+        cr_idx = col_indices.get("credit")
+        dr_amount = self._parse_amount_cell(self._safe_cell(row, dr_idx)) if dr_idx is not None else None
+        cr_amount = self._parse_amount_cell(self._safe_cell(row, cr_idx)) if cr_idx is not None else None
 
         if dr_amount is not None and dr_amount != 0:
             amount = dr_amount
@@ -102,13 +104,15 @@ class SBIStandardParser(BaseParser):
         else:
             amount = None
 
-        if "description" in col_indices:
-            desc = str(row[col_indices["description"]] or "").strip()
+        desc_idx = col_indices.get("description")
+        if desc_idx is not None:
+            desc = str(self._safe_cell(row, desc_idx) or "").strip()
             if desc:
                 description = desc
 
-        if not description and "ref" in col_indices:
-            desc = str(row[col_indices["ref"]] or "").strip()
+        ref_idx = col_indices.get("ref")
+        if not description and ref_idx is not None:
+            desc = str(self._safe_cell(row, ref_idx) or "").strip()
             if desc:
                 description = desc
 

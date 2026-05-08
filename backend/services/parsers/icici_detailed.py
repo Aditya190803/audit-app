@@ -248,12 +248,14 @@ class ICICIDetailedParser(BaseParser):
         description = None
 
         if "date" in col_indices:
-            cell = str(row[col_indices["date"]] or "").strip()
-            if date_pattern.search(cell):
-                date = cell
+            cell = self._safe_cell(row, col_indices["date"])
+            if cell and date_pattern.search(str(cell)):
+                date = str(cell)
 
-        wd_amount = self._parse_amount_cell(row[col_indices["withdrawal"]]) if "withdrawal" in col_indices else None
-        dp_amount = self._parse_amount_cell(row[col_indices["deposit"]]) if "deposit" in col_indices else None
+        wd_idx = col_indices.get("withdrawal")
+        dp_idx = col_indices.get("deposit")
+        wd_amount = self._parse_amount_cell(self._safe_cell(row, wd_idx)) if wd_idx is not None else None
+        dp_amount = self._parse_amount_cell(self._safe_cell(row, dp_idx)) if dp_idx is not None else None
 
         if wd_amount is not None and wd_amount != 0:
             amount = wd_amount
@@ -266,13 +268,15 @@ class ICICIDetailedParser(BaseParser):
         else:
             amount = None
 
-        if "description" in col_indices:
-            desc = str(row[col_indices["description"]] or "").strip()
+        desc_idx = col_indices.get("description")
+        if desc_idx is not None:
+            desc = str(self._safe_cell(row, desc_idx) or "").strip()
             if desc:
                 description = desc
 
-        if not description and "cheque" in col_indices:
-            desc = str(row[col_indices["cheque"]] or "").strip()
+        chq_idx = col_indices.get("cheque")
+        if not description and chq_idx is not None:
+            desc = str(self._safe_cell(row, chq_idx) or "").strip()
             if desc:
                 description = desc
 

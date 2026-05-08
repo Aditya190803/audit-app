@@ -11,6 +11,7 @@ from backend.services.config_service import ConfigService
 from backend.services.audit_service import AuditService
 import os
 import shutil
+import json
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -26,7 +27,7 @@ def get_transactions(session_id: int, db: Session = Depends(get_db)):
 
 @router.post("/parse")
 async def parse_files(
-    pdf: UploadFile = File(...),
+    pdf: List[UploadFile] = File(...),
     client_list: UploadFile = File(...),
     threshold: int = Form(50000),
     password: Optional[str] = Form(None),
@@ -38,22 +39,14 @@ async def parse_files(
     bank_name: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
-    """Parse PDF and client list, create session, and auto-tag transactions."""
-    # Save uploaded files
+    """Parse one or more PDFs and client list, create session, and auto-tag transactions."""
     upload_dir = "uploads"
     os.makedirs(upload_dir, exist_ok=True)
     
-    pdf_path = os.path.join(upload_dir, pdf.filename)
+    # Save client list
     client_list_path = os.path.join(upload_dir, client_list.filename)
-    
-    with open(pdf_path, "wb") as f:
-        shutil.copyfileobj(pdf.file, f)
     with open(client_list_path, "wb") as f:
         shutil.copyfileobj(client_list.file, f)
-    
-    # Parse PDF
-    pdf_service = PDFService()
-    transactions_data = pdf_service.parse_transactions(pdf_path, password, bank_name=bank_name)
     
     # Parse client list (CSV or Excel)
     csv_service = CSVService()
@@ -65,7 +58,6 @@ async def parse_files(
     
     # Filter out excluded brokers if provided
     if excluded_brokers:
-        import json
         try:
             excluded = json.loads(excluded_brokers)
             if excluded:
@@ -75,13 +67,25 @@ async def parse_files(
 
     # Filter by selected AP codes if provided
     if ap_codes:
-        import json
         try:
             selected = json.loads(ap_codes)
             if selected:
                 clients = csv_service.filter_clients_by_ap_codes(clients, selected)
         except Exception:
             pass
+    
+    # Parse all PDFs and combine transactions
+    pdf_service = PDFService()
+    all_transactions = []
+    pdf_paths = []
+    
+    for pdf_file in pdf:
+        pdf_path = os.path.join(upload_dir, pdf_file.filename)
+        with open(pdf_path, "wb") as f:
+            shutil.copyfileobj(pdf_file.file, f)
+        pdf_paths.append(pdf_path)
+        txns = pdf_service.parse_transactions(pdf_path, password, bank_name=bank_name)
+        all_transactions.extend(txns)
     
     # Create session
     session_service = SessionService(db)
@@ -90,14 +94,14 @@ async def parse_files(
     settings['suspicious_threshold'] = threshold
     
     session = session_service.create_session(
-        name=f"Audit: {pdf.filename}",
-        pdf_path=pdf_path,
+        name=f"Audit: {', '.join(p.filename for p in pdf)}",
+        pdf_path=json.dumps(pdf_paths),
         csv_path=client_list_path,
         settings_snapshot=settings
     )
     
     # Add transactions
-    transactions = session_service.add_transactions(session.id, transactions_data)
+    transactions = session_service.add_transactions(session.id, all_transactions)
     
     # Auto-tag
     tagging = TaggingService(db)

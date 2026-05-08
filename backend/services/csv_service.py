@@ -3,6 +3,8 @@ import pandas as pd
 from typing import List, Dict, Any
 import os
 
+PHONE_KEYWORDS = ['phone', 'mobile', 'cell', 'telephone', 'contact_no', 'contact', 'phone_no', 'mobile_no', 'tel']
+
 class CSVService:
     def parse_client_list(self, file_path: str, sheet_name: str = None, name_column: str = None) -> List[Dict[str, Any]]:
         """Parse a CSV or Excel client list and return normalized client records."""
