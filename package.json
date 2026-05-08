@@ -1,0 +1,75 @@
+{
+  "name": "bank-audit-app",
+  "version": "1.0.0",
+  "description": "Bank Statement Auditing App",
+  "main": "./out/main/main.js",
+  "author": "",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "build:python": "node scripts/build-python.js",
+    "preview": "electron-vite preview",
+    "dist": "bun run build && bun run build:python && electron-builder",
+    "dist:win": "bun run build && bun run build:python && electron-builder --win",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.1",
+    "@electron-toolkit/utils": "^3.0.0",
+    "@tanstack/react-table": "^8.21.3",
+    "axios": "^1.8.4",
+    "date-fns": "^4.1.0",
+    "electron-updater": "^6.6.2",
+    "lucide-react": "^0.487.0",
+    "pdfjs-dist": "^5.7.284",
+    "react-dropzone": "^15.0.0",
+    "react-hotkeys-hook": "^5.0.1",
+    "react-pdf": "^10.4.1",
+    "xlsx": "^0.18.5",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@electron-toolkit/tsconfig": "^1.0.1",
+    "@types/node": "^22.14.1",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.4.1",
+    "autoprefixer": "^10.4.21",
+    "electron": "^35.2.0",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^3.1.0",
+    "get-port": "^7.1.0",
+    "postcss": "^8.5.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.3"
+  },
+  "build": {
+    "appId": "com.bankaudit.app",
+    "productName": "Bank Audit App",
+    "directories": {
+      "output": "out/dist"
+    },
+    "files": [
+      "out",
+      "!backend"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/python-dist",
+        "to": "backend"
+      },
+      {
+        "from": "resources/tesseract",
+        "to": "tesseract"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    }
+  }
+}
