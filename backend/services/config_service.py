@@ -36,7 +36,12 @@ class ConfigService:
     
     def update_many(self, updates: Dict[str, Any]):
         for key, value in updates.items():
-            self.set(key, value)
+            config = self.db.query(Config).filter(Config.key == key).first()
+            if config:
+                config.value = value
+            else:
+                self.db.add(Config(key=key, value=value, category="general"))
+        self.db.commit()
         return self.get_all()
     
     def reset_to_defaults(self):

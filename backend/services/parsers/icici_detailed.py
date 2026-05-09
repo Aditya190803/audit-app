@@ -307,13 +307,12 @@ class ICICIDetailedParser(BaseParser):
                 date = cell_str
             elif amount is None and amount_pattern.search(cell_str):
                 try:
-                    amt = (
-                        cell_str.replace(",", "")
-                        .replace("$", "")
-                        .replace("(", "-")
-                        .replace(")", "")
-                    )
-                    amount = float(amt)
+                    amt_str = cell_str.replace(",", "").replace("$", "").replace(" ", "")
+                    negative = amt_str.startswith('(') and amt_str.endswith(')')
+                    amt_str = amt_str.replace("(", "").replace(")", "")
+                    amount = float(amt_str)
+                    if negative:
+                        amount = -amount
                 except ValueError:
                     pass
             elif description is None and len(cell_str) > 3 and not value_date_pattern.match(cell_str):

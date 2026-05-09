@@ -3,6 +3,17 @@ from backend.models import AuditSession, Transaction, UndoRedoState
 from typing import Optional, Dict, Any, List
 import json
 
+def resolve_pdf_paths(pdf_path: str | None) -> List[str]:
+    if not pdf_path:
+        return []
+    try:
+        parsed = json.loads(pdf_path)
+        if isinstance(parsed, list):
+            return parsed
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return [pdf_path]
+
 class SessionService:
     def __init__(self, db: Session):
         self.db = db

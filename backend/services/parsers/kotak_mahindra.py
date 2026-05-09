@@ -128,6 +128,9 @@ class KotakMahindraParser(BaseParser):
             types[0] = "withdrawal"
         elif dp_in_tx1_n < len(deposits):
             types[0] = "deposit"
+        elif n >= 2 and balances[0] is not None and balances[1] is not None:
+            # Infer from balance change
+            types[0] = "deposit" if balances[1] >= balances[0] else "withdrawal"
 
         wd_i = 0
         dp_i = 0

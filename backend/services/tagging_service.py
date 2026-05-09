@@ -27,8 +27,8 @@ class TaggingService:
         return None
 
     @staticmethod
-    def _build_phone_map(clients: List[Dict[str, Any]]) -> Dict[str, str]:
-        phone_map = {}
+    def _build_phone_map(clients: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+        phone_map: Dict[str, List[str]] = {}
         for c in clients:
             raw = c.get('raw_data', {})
             for key, val in raw.items():
@@ -38,7 +38,7 @@ class TaggingService:
                     if v and v.lower() not in ('nan', '', 'none', 'null'):
                         normalized = TaggingService._normalize_phone(v)
                         if normalized:
-                            phone_map[normalized] = c['name']
+                            phone_map.setdefault(normalized, []).append(c['name'])
         return phone_map
 
     @staticmethod
@@ -49,12 +49,72 @@ class TaggingService:
         result = set()
         for c in candidates:
             normalized = TaggingService._normalize_phone(c)
-            if normalized:
+            if normalized and TaggingService._is_valid_phone(normalized):
                 result.add(normalized)
         return list(result)
+
+    @staticmethod
+    def _extract_party_name(text: str) -> str | None:
+        """Extract likely party name from bank transaction description."""
+        if not text:
+            return None
+
+        text = ' '.join(text.split())
+
+        # UPI format: .../REF/NAME/BANK/...
+        m = re.search(r'UPI\w*\s*/\s*\w+\s*/\s*\w+\s*/\s*([^/]+?)\s*/', text)
+        if m:
+            name = m.group(1).strip()
+            if len(name) > 1:
+                return name
+
+        # NEFT format: ...*NAME (last asterisk segment)
+        m = re.search(r'\*\s*([A-Za-z\s]+?)(?:\s+\d+\s*|\s*$)', text)
+        if m:
+            name = m.group(1).strip()
+            if len(name) > 3:
+                return name
+
+        # AS PER REQ / INVESTMENT format
+        m = re.search(r'OF\s+(?:Mr|Mrs|Ms)\.?\s+([A-Za-z\s]+?)(?:\s*\(|\s+\d|\s*$)', text)
+        if m:
+            name = m.group(1).strip()
+            if len(name) > 3:
+                return name
+
+        return None
+
+    @staticmethod
+    def _is_valid_phone(phone: str) -> bool:
+        """Validate that a digit string looks like a real phone number, not a ref number."""
+        if not phone:
+            return False
+        # Remove country code prefix for validation
+        n = phone
+        if len(n) == 12 and n.startswith('91'):
+            n = n[2:]
+        elif len(n) == 11 and n.startswith('0'):
+            n = n[1:]
+        # After normalization we should have 10 digits
+        if len(n) != 10:
+            return False
+        # Indian mobile numbers start with 6-9
+        if n[0] not in ('6', '7', '8', '9'):
+            return False
+        # Reject sequences that are likely ref numbers (all same digit, sequential)
+        if len(set(n)) <= 2:
+            return False
+        return True
     
-    def auto_tag_session(self, session_id: int, clients: List[Dict[str, Any]]) -> List[Tag]:
-        """Auto-tag all transactions in a session."""
+    def auto_tag_session(self, session_id: int, clients: List[Dict[str, Any]],
+                         session_settings: Dict[str, Any] = None) -> List[Tag]:
+        """Auto-tag all transactions in a session.
+        
+        Args:
+            session_id: Session to process
+            clients: Client list for matching
+            session_settings: Per-session settings snapshot (e.g., threshold override)
+        """
         transactions = self.db.query(Transaction).filter(Transaction.session_id == session_id).all()
         
         # Load brokers and aliases
@@ -66,9 +126,10 @@ class TaggingService:
         aliases = self.db.query(Alias).all()
         alias_list = [{"alias_name": a.alias_name, "canonical_name": a.canonical_name} for a in aliases]
         
-        # Get exclusions
+        # Use per-session threshold if available, otherwise global config
+        session_settings = session_settings or {}
         exclusions = self.config.get("broker_exclusions") or []
-        threshold = self.config.get_threshold()
+        threshold = float(session_settings.get("suspicious_threshold", self.config.get_threshold()))
         recurring_window = int(self.config.get("recurring_days_window") or 30)
         suspicious_keywords = self.config.get("suspicious_keywords") or []
         
@@ -80,6 +141,7 @@ class TaggingService:
             Tag.transaction_id.in_([t.id for t in transactions]),
             Tag.is_manual == False
         ).delete(synchronize_session=False)
+        self.db.flush()
         
         new_tags = []
         
@@ -91,79 +153,97 @@ class TaggingService:
             desc_text = tx.description or ""
             full_text = f"{party_text} {desc_text}"
             
-            # --- Check suspicious FIRST (if suspicious, skip client/broker) ---
-            is_suspicious = False
-            reasons = []
+            # Extract clean party name from description for better matching
+            match_text = self._extract_party_name(full_text) or full_text
             
-            # Amount threshold
-            if tx.amount and abs(tx.amount) >= threshold:
-                is_suspicious = True
-                reasons.append(f"Amount {tx.amount} exceeds threshold {threshold}")
+            # --- Priority: client > broker > suspicious ---
+            tagged = False
             
-            # Recurring transaction to same party
-            if tx.id in recurring_map:
-                is_suspicious = True
-                reasons.append("Recurring transaction to same party")
-            
-            # Suspicious keywords in full text (party_name + description)
-            full_text_lower = full_text.lower()
-            for keyword in suspicious_keywords:
-                if keyword.lower() in full_text_lower:
-                    is_suspicious = True
-                    reasons.append(f"Contains suspicious keyword: '{keyword}'")
-            
-            if is_suspicious:
-                tag = Tag(
-                    transaction_id=tx.id,
-                    tag_type="suspicious",
-                    confidence=1.0,
-                    reason="; ".join(reasons),
-                    source="auto",
-                    is_manual=False
-                )
-                new_tags.append(tag)
-                self.db.add(tag)
-                continue  # Skip client/broker tagging for suspicious transactions
-            
-            # --- 1. Client matching — fuzzy name + exact phone ---
-            client_matches = self.fuzzy.match_client_names(full_text, clients, alias_list)
-            for match in client_matches:
-                if match["score"] >= self.config.get_fuzzy_threshold():
-                    tag = Tag(
-                        transaction_id=tx.id,
-                        tag_type="client",
-                        confidence=match["score"],
-                        reason=f"Fuzzy match: '{match['original']}' (score: {match['score']})",
-                        source="auto",
-                        is_manual=False
-                    )
-                    new_tags.append(tag)
-                    self.db.add(tag)
-            
-            # Phone number exact match
+            # 1. Phone number exact match (most reliable)
             phone_candidates = self._extract_phone_candidates(full_text)
             for phone in phone_candidates:
                 if phone in phone_map:
-                    tag = Tag(
-                        transaction_id=tx.id,
-                        tag_type="client",
-                        confidence=1.0,
-                        reason=f"Phone match: {phone} -> {phone_map[phone]}",
-                        source="auto",
-                        is_manual=False
-                    )
-                    new_tags.append(tag)
-                    self.db.add(tag)
+                    for client_name in phone_map[phone]:
+                        tag = Tag(
+                            transaction_id=tx.id,
+                            tag_type="client",
+                            confidence=1.0,
+                            reason=f"Phone match: {phone} -> {client_name}",
+                            source="auto",
+                            is_manual=False
+                        )
+                        new_tags.append(tag)
+                        self.db.add(tag)
+                        tagged = True
+                        break
+                if tagged:
+                    break
             
-            # --- 2. Broker matching ---
-            broker_matches = self.fuzzy.match_broker_names(full_text, broker_names, exclusions)
-            for match in broker_matches:
-                if match["score"] >= self.config.get_fuzzy_threshold():
+            if not tagged:
+                # 2. Fuzzy client name matching (using extracted name)
+                client_matches = self.fuzzy.match_client_names(match_text, clients, alias_list)
+                for match in client_matches:
+                    if match["score"] >= self.config.get_fuzzy_threshold():
+                        tag = Tag(
+                            transaction_id=tx.id,
+                            tag_type="client",
+                            confidence=match["score"],
+                            reason=f"Fuzzy match: '{match['original']}' (score: {match['score']})",
+                            source="auto",
+                            is_manual=False
+                        )
+                        new_tags.append(tag)
+                        self.db.add(tag)
+                        tagged = True
+                        break
+            
+            if not tagged:
+                # 3. Broker matching (only for names not tagged as client, using full text to avoid false matches on short extracted names)
+                common_words = self.config.get("broker_common_words") or []
+                broker_matches = self.fuzzy.match_broker_names(full_text, broker_names, exclusions, common_words)
+                for match in broker_matches:
+                    if match["score"] >= self.config.get_fuzzy_threshold():
+                        tag = Tag(
+                            transaction_id=tx.id,
+                            tag_type="broker",
+                            confidence=match["score"],
+                            reason=f"Broker match: '{match['original']}' (score: {match['score']})",
+                            source="auto",
+                            is_manual=False
+                        )
+                        new_tags.append(tag)
+                        self.db.add(tag)
+                        tagged = True
+                        break
+            
+            if not tagged:
+                # 4. Suspicious check (only for names not tagged as client or broker)
+                is_suspicious = False
+                reasons = []
+                
+                # Amount threshold
+                if tx.amount and abs(tx.amount) >= threshold:
+                    is_suspicious = True
+                    reasons.append(f"Amount {tx.amount} exceeds threshold {threshold}")
+                
+                # Recurring transaction to same party
+                if tx.id in recurring_map:
+                    is_suspicious = True
+                    reasons.append("Recurring transaction to same party")
+                
+                # Suspicious keywords in full text (party_name + description)
+                full_text_lower = full_text.lower()
+                for keyword in suspicious_keywords:
+                    if keyword.lower() in full_text_lower:
+                        is_suspicious = True
+                        reasons.append(f"Contains suspicious keyword: '{keyword}'")
+                
+                if is_suspicious:
                     tag = Tag(
                         transaction_id=tx.id,
-                        tag_type="broker",
-                        confidence=match["score"],
-                        reason=f"Broker match: '{match['original']}' (score: {match['score']})",
+                        tag_type="suspicious",
+                        confidence=1.0,
+                        reason="; ".join(reasons),
                         source="auto",
                         is_manual=False
                     )
@@ -179,29 +259,47 @@ class TaggingService:
         return new_tags
     
     def _detect_recurring(self, transactions: List[Transaction], window_days: int) -> set:
-        """Detect recurring transactions by amount and party."""
+        """Detect recurring transactions by amount and party within a date window."""
         recurring = set()
         groups = defaultdict(list)
         
+        def _parse_date(d: str | None):
+            if not d:
+                return None
+            for fmt in ('%d-%m-%Y', '%d/%m/%Y', '%Y-%m-%d', '%d %b %Y', '%d-%b-%Y', '%d/%b/%Y'):
+                try:
+                    return datetime.strptime(d, fmt)
+                except ValueError:
+                    continue
+            return None
+        
         for tx in transactions:
             if tx.amount and tx.party_name:
-                key = (round(abs(tx.amount), 2), self.fuzzy.normalize_text(tx.party_name))
+                # Keep sign so credits and debits are grouped separately
+                key = (round(tx.amount, 2), self.fuzzy.normalize_text(tx.party_name))
                 groups[key].append(tx)
         
         for key, txs in groups.items():
-            if len(txs) > 1:
-                for tx in txs:
-                    recurring.add(tx.id)
+            if len(txs) < 2:
+                continue
+            sorted_txs = sorted(txs, key=lambda t: _parse_date(t.date) or datetime.min)
+            for i in range(len(sorted_txs)):
+                for j in range(i + 1, len(sorted_txs)):
+                    d1 = _parse_date(sorted_txs[i].date)
+                    d2 = _parse_date(sorted_txs[j].date)
+                    if d1 and d2 and abs((d2 - d1).days) <= window_days:
+                        recurring.add(sorted_txs[i].id)
+                        recurring.add(sorted_txs[j].id)
         
         return recurring
     
     def add_manual_tag(self, transaction_id: int, tag_type: str, 
-                       reason: str = "", confidence: float = 1.0) -> Tag:
-        """Add a manual tag to a transaction."""
-        # Remove any existing auto-tag of same type
+                       reason: str = "", confidence: float = 1.0,
+                       source: str = "manual", is_manual: bool = True,
+                       commit: bool = True) -> Tag:
+        """Add a manual tag to a transaction. Removes all existing auto-tags first (single-tag model)."""
         self.db.query(Tag).filter(
             Tag.transaction_id == transaction_id,
-            Tag.tag_type == tag_type,
             Tag.is_manual == False
         ).delete(synchronize_session=False)
         
@@ -210,12 +308,13 @@ class TaggingService:
             tag_type=tag_type,
             confidence=confidence,
             reason=reason or f"Manually tagged as {tag_type}",
-            source="manual",
-            is_manual=True
+            source=source,
+            is_manual=is_manual
         )
         self.db.add(tag)
-        self.db.commit()
-        self.db.refresh(tag)
+        if commit:
+            self.db.commit()
+            self.db.refresh(tag)
         return tag
     
     def remove_tag(self, tag_id: int) -> bool:
@@ -244,12 +343,17 @@ class TaggingService:
         
         tags = self.db.query(Tag).filter(Tag.transaction_id.in_(tx_ids)).all()
         
-        summary = {"client": 0, "broker": 0, "suspicious": 0, "total_tagged": 0}
+        summary = {"client": 0, "broker": 0, "suspicious": 0, "total_tagged": 0,
+                   "manual_tags": 0, "auto_tags": 0}
         tagged_txs = set()
         
         for tag in tags:
             if tag.tag_type in summary:
                 summary[tag.tag_type] += 1
+            if tag.is_manual:
+                summary["manual_tags"] += 1
+            else:
+                summary["auto_tags"] += 1
             tagged_txs.add(tag.transaction_id)
         
         summary["total_tagged"] = len(tagged_txs)

@@ -17,7 +17,7 @@ class BaseParser(ABC):
 
     @staticmethod
     def _find_header_row(data: List[List[str]], keywords: List[str]) -> int:
-        for i, row in enumerate(data[:5]):
+        for i, row in enumerate(data[:15]):
             row_text = " ".join(str(c or "") for c in row).lower()
             matches = sum(1 for kw in keywords if re.search(kw, row_text))
             if matches >= 2:
@@ -47,11 +47,17 @@ class BaseParser(ABC):
     def _parse_amount_cell(cell: Optional[str]) -> Optional[float]:
         if not cell:
             return None
-        cleaned = str(cell).strip().replace(",", "").replace("$", "").replace("(", "-").replace(")", "").replace(" ", "")
-        match = re.search(r"[\d]+\.\d{2}", cleaned)
+        cleaned = str(cell).strip().replace(",", "").replace("$", "").replace(" ", "")
+        # Handle parenthesized amounts: (1,000.00) → -1000.00
+        negative = cleaned.startswith('(') and cleaned.endswith(')')
+        cleaned = cleaned.replace("(", "").replace(")", "")
+        match = re.search(r"-?[\d]+\.\d{2}", cleaned)
+        if not match:
+            match = re.search(r"[\d]+\.\d{2}", cleaned)
         if match:
             try:
-                return float(match.group())
+                val = float(match.group())
+                return -val if negative else val
             except ValueError:
                 return None
         return None

@@ -24,7 +24,8 @@ class ExportService:
             data.append({
                 "id": tx.id,
                 "date": tx.date,
-                "amount": tx.amount,
+                "debit": -tx.amount if tx.amount and tx.amount < 0 else '',
+                "credit": tx.amount if tx.amount and tx.amount > 0 else '',
                 "description": tx.description,
                 "party_name": tx.party_name,
                 "tags": ", ".join(tag_types),
@@ -43,7 +44,7 @@ class ExportService:
         ws.title = "Transactions"
         
         # Headers
-        headers = ["ID", "Date", "Amount", "Description", "Party Name", "Tags", "Tag Reasons", "Page"]
+        headers = ["ID", "Date", "Debit", "Credit", "Description", "Party Name", "Tags", "Tag Reasons", "Page"]
         header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
         header_font = Font(color="FFFFFF", bold=True)
         
@@ -68,7 +69,10 @@ class ExportService:
             elif "client" in tag_types:
                 fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
             
-            values = [tx.id, tx.date, tx.amount, tx.description, tx.party_name, 
+            values = [tx.id, tx.date,
+                     -tx.amount if tx.amount and tx.amount < 0 else '',
+                     tx.amount if tx.amount and tx.amount > 0 else '',
+                     tx.description, tx.party_name, 
                      ", ".join(tag_types), "; ".join(tag_reasons), tx.page_number]
             
             for col, value in enumerate(values, 1):

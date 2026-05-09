@@ -2,6 +2,17 @@ from rapidfuzz import fuzz, process
 from typing import List, Dict, Any, Optional, Tuple
 import re
 
+COMMON_WORDS = {
+    "limited", "ltd", "pvt", "private", "securities", "services",
+    "company", "india", "commodities", "broking", "brokers", "brokerage",
+    "capital", "finance", "financial", "investment", "investments",
+    "equities", "equity", "stock", "shares", "trading", "ventures",
+    "holdings", "consultants", "consultancy", "management", "advisory",
+    "derivatives", "fintech", "technologies", "solutions", "llp",
+    "enterprises", "intermediaries", "portfolio", "wealth", "markets",
+    "global", "international", "payments", "money"
+}
+
 class FuzzyService:
     def __init__(self, threshold: float = 0.75):
         self.threshold = threshold
@@ -58,7 +69,10 @@ class FuzzyService:
     
     def match_client_names(self, text: str, clients: List[Dict[str, Any]], 
                           aliases: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        """Match text against client names and aliases."""
+        """Match text against client names and aliases.
+        
+        Short names (<4 chars) require a higher threshold (0.9) to reduce false positives.
+        """
         candidate_names = [c["name"] for c in clients]
         
         # Add aliases to candidates
@@ -70,23 +84,69 @@ class FuzzyService:
         
         matches = self.find_matches(text, candidate_names)
         
-        # Resolve aliases to canonical names
+        # Filter out weak short-name matches
+        filtered = []
         for match in matches:
+            name = match["original"]
+            # Short names need higher confidence to avoid substring false positives
+            min_tokens = len(self.normalize_text(name).split())
+            if min_tokens <= 2 and len(name.strip()) < 6:
+                if match["score"] < 0.9:
+                    continue
+            filtered.append(match)
+        
+        # Resolve aliases to canonical names
+        for match in filtered:
             if aliases and match["original"] in alias_map:
                 match["canonical_name"] = alias_map[match["original"]]
                 match["is_alias"] = True
             else:
                 match["is_alias"] = False
         
-        return matches
+        return filtered
     
+    def _get_significant_tokens(self, name: str, common_words: set = None) -> set:
+        """Extract tokens from a name, excluding common corporate words."""
+        if common_words is None:
+            common_words = COMMON_WORDS
+        tokens = set(self.normalize_text(name).split())
+        return {t for t in tokens if t not in common_words and len(t) >= 3}
+
+    def _has_significant_match(self, text: str, broker_name: str, common_words: set = None) -> bool:
+        """Check if text has a fuzzy match for at least one significant broker token."""
+        sig_broker = self._get_significant_tokens(broker_name, common_words)
+        if not sig_broker:
+            return False
+        text_tokens = self.normalize_text(text).split()
+        # Check if any significant broker token fuzzy-matches any text token
+        for sig in sig_broker:
+            for t in text_tokens:
+                if len(t) < 3:
+                    continue
+                score = fuzz.ratio(sig, t) / 100.0
+                if score >= 0.75:
+                    return True
+        return False
+
     def match_broker_names(self, text: str, brokers: List[str],
-                          exclusions: List[str] = None) -> List[Dict[str, Any]]:
-        """Match text against broker names, respecting exclusions."""
+                          exclusions: List[str] = None,
+                          common_words: List[str] = None) -> List[Dict[str, Any]]:
+        """Match text against broker names, respecting exclusions.
+        
+        Only returns matches where at least one significant (non-generic)
+        token from the broker name appears in the text.
+        """
         if exclusions:
             brokers = [b for b in brokers if b not in exclusions]
         
-        return self.find_matches(text, brokers)
+        common_set = set(w.lower() for w in (common_words or [])) if common_words else COMMON_WORDS
+        
+        matches = self.find_matches(text, brokers)
+        filtered = []
+        for m in matches:
+            if self._has_significant_match(text, m["original"], common_set):
+                filtered.append(m)
+        return filtered
     
     def batch_match(self, texts: List[str], candidates: List[str]) -> List[List[Dict[str, Any]]]:
         """Batch match multiple texts against candidates."""

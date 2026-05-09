@@ -91,7 +91,7 @@ class ICICINumberedParser(BaseParser):
                     break
                 elif sno_pattern.match(cline) and i + 1 < n and date_pattern.match(lines[i + 1].strip()):
                     break
-                elif any(kw in cline.lower() for kw in ["s no.", "transaction date", "cheque number", "withdrawal", "deposit", "balance", "dial your bank", "never share", "www.", "please call"]):
+                elif self._is_header_or_footer(cline):
                     i += 1
                     continue
                 else:
@@ -113,7 +113,7 @@ class ICICINumberedParser(BaseParser):
                     break
                 elif sno_pattern.match(cline) and i + 1 < n and date_pattern.match(lines[i + 1].strip()):
                     break
-                elif any(kw in cline.lower() for kw in ["s no.", "transaction date", "cheque number", "withdrawal", "deposit", "balance", "dial your bank", "never share", "www.", "please call"]):
+                elif self._is_header_or_footer(cline):
                     i += 1
                     continue
                 else:
@@ -131,6 +131,21 @@ class ICICINumberedParser(BaseParser):
             })
 
         return transactions
+
+    @staticmethod
+    def _is_header_or_footer(line: str) -> bool:
+        """Check if a line is a header/footer marker, not a transaction description."""
+        cline = line.lower().strip()
+        # Short lines that are clearly headers
+        if len(cline) < 5:
+            return False
+        header_patterns = ["s no.", "transaction date", "cheque number",
+                           "withdrawal", "deposit", "balance",
+                           "dial your bank", "never share", "www.", "please call"]
+        for kw in header_patterns:
+            if cline.startswith(kw) or cline == kw:
+                return True
+        return False
 
     @staticmethod
     def _parse_amount(text: str) -> Optional[float]:

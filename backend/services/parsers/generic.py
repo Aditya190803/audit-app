@@ -141,9 +141,18 @@ class GenericParser(BaseParser):
             if date is None and date_pattern.search(cell_str):
                 date = cell_str
             elif amount is None and amount_pattern.search(cell_str):
+                # Skip if it looks like a date (multiple dots/slashes)
+                dot_count = cell_str.count('.')
+                slash_count = cell_str.count('/')
+                if dot_count > 1 or slash_count > 0:
+                    continue
                 try:
-                    amt = cell_str.replace(",", "").replace("$", "").replace("(", "-").replace(")", "")
-                    amount = float(amt)
+                    amt_str = cell_str.replace(",", "").replace("$", "").replace(" ", "")
+                    negative = amt_str.startswith('(') and amt_str.endswith(')')
+                    amt_str = amt_str.replace("(", "").replace(")", "")
+                    amount = float(amt_str)
+                    if negative:
+                        amount = -amount
                 except ValueError:
                     pass
             elif description is None and len(cell_str) > 3 and not value_date_pattern.match(cell_str):
