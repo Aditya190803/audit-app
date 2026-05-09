@@ -2,9 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from backend.database import get_db
-from backend.schemas import TagCreate, TagResponse
+from backend.schemas import TagCreate, TagResponse, BulkTagRequest
 from backend.services.tagging_service import TaggingService
 from backend.services.audit_service import AuditService
+from backend.services.session_service import SessionService
 
 router = APIRouter(prefix="/tags", tags=["tags"])
 
@@ -20,7 +21,9 @@ def add_tag(data: TagCreate, db: Session = Depends(get_db)):
         transaction_id=data.transaction_id,
         tag_type=data.tag_type,
         reason=data.reason,
-        confidence=data.confidence
+        confidence=data.confidence,
+        source=data.source,
+        is_manual=data.is_manual
     )
     
     # Log
@@ -44,3 +47,26 @@ def bulk_remove_tags(tag_ids: List[int], db: Session = Depends(get_db)):
     service = TaggingService(db)
     count = service.bulk_remove_tags(tag_ids)
     return {"removed_count": count}
+
+@router.post("/bulk-add")
+def bulk_add_tags(data: BulkTagRequest, db: Session = Depends(get_db)):
+    service = TaggingService(db)
+    audit = AuditService(db)
+    tags = []
+    for tx_id in data.transaction_ids:
+        tag = service.add_manual_tag(
+            transaction_id=tx_id,
+            tag_type=data.tag_type,
+            reason=data.reason or f"Manually tagged as {data.tag_type}",
+            confidence=data.confidence,
+            commit=False
+        )
+        tags.append({"id": tag.id, "transaction_id": tx_id, "tag_type": data.tag_type})
+        audit.log("tag_added", "tag", tag.id,
+                  old_value=None,
+                  new_value={"tag_type": data.tag_type, "transaction_id": tx_id},
+                  is_auto=False)
+    db.commit()
+    for t in tags:
+        db.refresh(db.query(Tag).filter(Tag.id == t["id"]).first())
+    return {"tagged_count": len(tags), "tags": tags}

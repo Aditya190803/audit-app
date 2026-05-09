@@ -61,7 +61,14 @@ async def parse_files(
         try:
             excluded = json.loads(excluded_brokers)
             if excluded:
-                clients = [c for c in clients if c.get('broker') not in excluded]
+                def _get_broker_name(client: dict) -> str:
+                    raw = client.get('raw_data', {})
+                    for key, val in raw.items():
+                        k = str(key).lower().strip()
+                        if k in ('broker', 'broker_name', 'brokername', 'source'):
+                            return str(val).strip()
+                    return ''
+                clients = [c for c in clients if _get_broker_name(c) not in excluded]
         except Exception:
             pass
 
@@ -103,9 +110,9 @@ async def parse_files(
     # Add transactions
     transactions = session_service.add_transactions(session.id, all_transactions)
     
-    # Auto-tag
+    # Auto-tag (pass session settings so per-session threshold is used)
     tagging = TaggingService(db)
-    tags = tagging.auto_tag_session(session.id, clients)
+    tags = tagging.auto_tag_session(session.id, clients, session_settings=settings)
     
     # Log
     audit = AuditService(db)

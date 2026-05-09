@@ -30,6 +30,19 @@ def get_session(session_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Session not found")
     return session
 
+@router.patch("/{session_id}")
+def update_session(session_id: int, data: AuditSessionCreate, db: Session = Depends(get_db)):
+    service = SessionService(db)
+    session = service.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    kwargs = {}
+    if data.name is not None:
+        kwargs["name"] = data.name
+    if kwargs:
+        service.update_session(session_id, **kwargs)
+    return service.get_session(session_id)
+
 @router.delete("/{session_id}")
 def delete_session(session_id: int, db: Session = Depends(get_db)):
     service = SessionService(db)

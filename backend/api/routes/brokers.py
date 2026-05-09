@@ -34,11 +34,22 @@ def update_broker(broker_id: int, data: BrokerCreate, db: Session = Depends(get_
     if not broker:
         raise HTTPException(status_code=404, detail="Broker not found")
     
+    old_name = broker.name
     broker.name = data.name
     broker.aliases = data.aliases
     broker.is_active = data.is_active
     db.commit()
     db.refresh(broker)
+    
+    # Update config broker list
+    config = ConfigService(db)
+    brokers = config.get_brokers()
+    if old_name in brokers:
+        brokers.remove(old_name)
+    if data.name not in brokers:
+        brokers.append(data.name)
+    config.set_brokers(sorted(brokers))
+    
     return broker
 
 @router.delete("/{broker_id}")
@@ -47,6 +58,15 @@ def delete_broker(broker_id: int, db: Session = Depends(get_db)):
     if not broker:
         raise HTTPException(status_code=404, detail="Broker not found")
     
+    name = broker.name
     db.delete(broker)
     db.commit()
+    
+    # Remove from config broker list
+    config = ConfigService(db)
+    brokers = config.get_brokers()
+    if name in brokers:
+        brokers.remove(name)
+        config.set_brokers(brokers)
+    
     return {"message": "Broker deleted"}
