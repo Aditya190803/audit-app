@@ -2,6 +2,12 @@ import { create } from 'zustand'
 
 type ResultFilter = 'all' | 'client' | 'broker' | 'suspicious'
 
+interface Toast {
+  id: number
+  message: string
+  action?: { label: string; onClick: () => void }
+}
+
 interface UIState {
   sidebarOpen: boolean
   settingsOpen: boolean
@@ -14,6 +20,9 @@ interface UIState {
   resultFilter: ResultFilter
   minAmount: number | null
   maxAmount: number | null
+  toasts: Toast[]
+  pushToast: (toast: Omit<Toast, 'id'>) => void
+  popToast: (id: number) => void
   toggleSidebar: () => void
   toggleSettings: () => void
   toggleExport: () => void
@@ -40,6 +49,13 @@ export const useUIStore = create<UIState>((set) => ({
   resultFilter: 'all',
   minAmount: null,
   maxAmount: null,
+  toasts: [],
+  pushToast: (toast) => {
+    const id = Date.now()
+    set((s) => ({ toasts: [...s.toasts, { ...toast, id }] }))
+    setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), 5000)
+  },
+  popToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
   toggleExport: () => set((s) => ({ exportOpen: !s.exportOpen })),
