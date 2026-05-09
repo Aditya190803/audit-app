@@ -15,17 +15,58 @@ const tagClasses: Record<string, string> = {
 
 function extractMatchedName(reason: string | null): string | null {
   if (!reason) return null
-  const match = reason.match(/'([^']+)'/)
-  return match ? match[1] : null
+  // Fuzzy match: 'John Doe' (score: ...)
+  let match = reason.match(/'([^']+)'/)
+  if (match) return match[1]
+  // Phone match: 9876543210 -> John Doe
+  match = reason.match(/->\s*(.+)$/)
+  if (match) return match[1].trim()
+  return null
+}
+
+function formatPhoneMatch(reason: string | null): string | null {
+  if (!reason) return null
+  // Phone match: 9876543210 -> John Doe
+  const match = reason.match(/Phone match:\s*(\d+)\s*->\s*(.+)/)
+  if (match) return `phone: ${match[1]}`
+  return null
+}
+
+function formatSuspiciousReason(reason: string | null): string {
+  if (!reason) return 'suspicious'
+  const segments = reason.split(';').map(s => s.trim()).filter(Boolean)
+  const parts: string[] = []
+  for (const seg of segments) {
+    const lower = seg.toLowerCase()
+    if (lower.startsWith('amount') && lower.includes('exceeds threshold')) {
+      const match = seg.match(/Amount\s+([\d.]+)/i)
+      const amount = match ? `₹${parseFloat(match[1]).toLocaleString('en-IN')}` : ''
+      parts.push(`${amount} exceeds threshold`)
+    } else if (lower.startsWith('contains suspicious keyword')) {
+      const kwMatch = seg.match(/'([^']+)'/)
+      parts.push(`keyword: ${kwMatch ? kwMatch[1] : '?'}`)
+    } else if (lower.includes('recurring')) {
+      parts.push('recurring transaction')
+    } else {
+      parts.push(seg)
+    }
+  }
+  return parts.join(' | ')
 }
 
 export const TagBadge: React.FC<TagBadgeProps> = ({ tag, onRemove, showConfidence = true }) => {
   const cls = tagClasses[tag.tag_type] || tagClasses.client
   const matchedName = extractMatchedName(tag.reason)
+  const suspiciousText = tag.tag_type === 'suspicious' ? formatSuspiciousReason(tag.reason) : null
+  const phoneText = tag.tag_type === 'client' ? formatPhoneMatch(tag.reason) : null
 
   return (
-    <span className={cls}>
-      {matchedName ? (
+    <span className={cls} title={tag.reason || tag.tag_type}>
+      {tag.tag_type === 'suspicious' && suspiciousText ? (
+        <span>{suspiciousText}</span>
+      ) : phoneText ? (
+        <span>{phoneText}</span>
+      ) : matchedName ? (
         <span>{matchedName}</span>
       ) : (
         <span className="capitalize">{tag.tag_type}</span>
@@ -57,7 +98,6 @@ export const TagBadgeList: React.FC<{
   if (!tags || tags.length === 0) return (
     <span className="text-xs text-[var(--text-tertiary)] italic">Untagged</span>
   )
-  // Single tag only: show only the first (most recent/relevant) tag
   const tag = tags[0]
   return (
     <TagBadge tag={tag} onRemove={onRemoveTag} />

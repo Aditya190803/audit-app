@@ -11,8 +11,18 @@ import {
   Users,
   Building2,
   AlertTriangle,
-  LayoutList
+  LayoutList,
+  CheckSquare
 } from 'lucide-react'
+
+function firstPdfPath(pdf_path: string | null): string | null {
+  if (!pdf_path) return null
+  try {
+    const parsed = JSON.parse(pdf_path)
+    if (Array.isArray(parsed)) return parsed[0] || null
+  } catch {}
+  return pdf_path
+}
 import { useUIStore } from '../stores/uiStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -23,6 +33,7 @@ import { SettingsPanel } from './SettingsPanel'
 import { ExportPanel } from './ExportPanel'
 import { PDFPreview } from './PDFPreview'
 import { KeyboardShortcuts } from './KeyboardShortcuts'
+import { ToastContainer } from './Toast'
 
 type ResultFilter = 'all' | 'client' | 'broker' | 'suspicious'
 
@@ -38,6 +49,9 @@ export const AppShell: React.FC = () => {
   const [currentPdfPage, setCurrentPdfPage] = useState(1)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sessionId: number } | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null)
+  const [renameId, setRenameId] = useState<number | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const renameInputRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
@@ -127,6 +141,27 @@ export const AppShell: React.FC = () => {
     setDeleteConfirmId(null)
   }
 
+  const startRename = (sessionId: number, currentName: string) => {
+    setRenameId(sessionId)
+    setRenameValue(currentName || `Session ${sessionId}`)
+    setTimeout(() => renameInputRef.current?.focus(), 50)
+  }
+
+  const commitRename = async () => {
+    if (renameId === null) return
+    const val = renameValue.trim()
+    if (val) {
+      const { renameSession } = await import('../lib/api')
+      await renameSession(renameId, val)
+      await loadSessions()
+      if (currentSession?.id === renameId) {
+        setCurrentSession({ ...currentSession, name: val })
+      }
+    }
+    setRenameId(null)
+    setRenameValue('')
+  }
+
   const handleGoHome = useCallback(() => {
     goHome()
     setCurrentSession(null)
@@ -161,13 +196,38 @@ export const AppShell: React.FC = () => {
 
   const handleAddTag = async (transactionId: number, tagType: string) => {
     const { getTags, addTag, bulkRemoveTags } = await import('../lib/api')
-    // Single tag only: remove existing tags first
+    const { pushToast } = useUIStore.getState()
     const existing = await getTags(transactionId)
-    const existingIds = existing.data.map((t) => t.id)
+    const prevTags = existing.data.map((t) => ({ id: t.id, tag_type: t.tag_type, source: t.source, is_manual: t.is_manual, reason: t.reason }))
+    const existingIds = prevTags.map((t) => t.id)
     if (existingIds.length > 0) {
       await bulkRemoveTags(existingIds)
     }
     await addTag(transactionId, tagType)
+    await refreshCurrentSession()
+    pushToast({
+      message: `Tagged as ${tagType}`,
+      action: {
+        label: 'Undo',
+        onClick: async () => {
+          const { getTags: gt, bulkRemoveTags: brt, addTag: at } = await import('../lib/api')
+          const current = await gt(transactionId)
+          const currentIds = current.data.map((t: any) => t.id)
+          if (currentIds.length > 0) await brt(currentIds)
+          for (const pt of prevTags) {
+            await at(transactionId, pt.tag_type, pt.reason, undefined, pt.source, pt.is_manual)
+          }
+          await refreshCurrentSession()
+        }
+      }
+    })
+  }
+
+  const handleBulkTag = async (tagType: string) => {
+    const { bulkAddTags } = await import('../lib/api')
+    if (selectedTransactionIds.length === 0) return
+    await bulkAddTags(selectedTransactionIds, tagType)
+    clearSelection()
     await refreshCurrentSession()
   }
 
@@ -182,6 +242,7 @@ export const AppShell: React.FC = () => {
   return (
     <div className="h-full flex bg-[var(--bg)]">
       <KeyboardShortcuts />
+      <ToastContainer />
 
       {/* Sidebar */}
       <aside
@@ -224,7 +285,8 @@ export const AppShell: React.FC = () => {
             {sessions.map((session) => (
               <button
                 key={session.id}
-                onClick={() => setCurrentSession(session)}
+                onClick={() => { if (renameId !== session.id) setCurrentSession(session) }}
+                onDoubleClick={() => startRename(session.id, session.name || '')}
                 onContextMenu={(e) => {
                   e.preventDefault()
                   setContextMenu({ x: e.clientX, y: e.clientY, sessionId: session.id })
@@ -237,7 +299,19 @@ export const AppShell: React.FC = () => {
               >
                 <div className="flex items-center gap-2">
                   <FileText className="h-3.5 w-3.5 flex-shrink-0 opacity-60" strokeWidth={2} />
-                  <span className="truncate font-medium">{session.name || `Session ${session.id}`}</span>
+                  {renameId === session.id ? (
+                    <input
+                      ref={renameInputRef}
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setRenameId(null) }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex-1 min-w-0 px-1 py-0 text-sm bg-white border border-[var(--primary)] rounded-[var(--radius-sm)] outline-none"
+                    />
+                  ) : (
+                    <span className="truncate font-medium">{session.name || `Session ${session.id}`}</span>
+                  )}
                 </div>
                 <div className="text-[11px] opacity-50 mt-0.5 pl-5">
                   {new Date(session.created_at).toLocaleDateString()}
@@ -299,9 +373,31 @@ export const AppShell: React.FC = () => {
 
               {selectedTransactionIds.length > 0 && (
                 <div className="flex items-center gap-2 px-2.5 py-1 bg-[var(--primary-subtle)] rounded-[var(--radius-md)] border border-[var(--primary)]/10">
+                  <CheckSquare className="h-3.5 w-3.5 text-[var(--primary)]" strokeWidth={2} />
                   <span className="text-xs font-medium text-[var(--primary)]">
                     {selectedTransactionIds.length} selected
                   </span>
+                  <span className="w-px h-4 bg-[var(--primary)]/20 mx-0.5" />
+                  <span className="text-[10px] text-[var(--text-tertiary)] mr-0.5">Tag:</span>
+                  <button
+                    onClick={() => handleBulkTag('client')}
+                    className="text-[10px] px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--success-subtle)] text-[var(--success)] hover:brightness-95 transition-all font-medium"
+                  >
+                    Client
+                  </button>
+                  <button
+                    onClick={() => handleBulkTag('broker')}
+                    className="text-[10px] px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--warning-subtle)] text-[var(--warning)] hover:brightness-95 transition-all font-medium"
+                  >
+                    Broker
+                  </button>
+                  <button
+                    onClick={() => handleBulkTag('suspicious')}
+                    className="text-[10px] px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--danger-subtle)] text-[var(--danger)] hover:brightness-95 transition-all font-medium"
+                  >
+                    Suspicious
+                  </button>
+                  <span className="w-px h-4 bg-[var(--primary)]/20 mx-0.5" />
                   <button
                     onClick={clearSelection}
                     className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors duration-150"
@@ -311,7 +407,7 @@ export const AppShell: React.FC = () => {
                 </div>
               )}
 
-              {currentSession?.pdf_path && (
+              {firstPdfPath(currentSession?.pdf_path ?? null) && (
                 <button
                   onClick={() => setPdfPreviewOpen(!pdfPreviewOpen)}
                   className={`btn-ghost ${pdfPreviewOpen ? 'text-[var(--primary)] bg-[var(--primary-subtle)]' : ''}`}
@@ -397,7 +493,7 @@ export const AppShell: React.FC = () => {
                     <div className="animate-spin rounded-full h-6 w-6 border-2 border-[var(--border-strong)] border-t-[var(--primary)]" />
                   </div>
                 ) : (
-                  <div className="flex-1 overflow-auto">
+                  <div className="flex-1 flex flex-col min-h-0">
                     <DataTable
                       transactions={transactions}
                       selectedIds={selectedTransactionIds}
@@ -412,10 +508,10 @@ export const AppShell: React.FC = () => {
                   </div>
                 )}
               </div>
-              {pdfPreviewOpen && currentSession?.pdf_path && (
+              {pdfPreviewOpen && firstPdfPath(currentSession?.pdf_path ?? null) && (
                 <div className="w-2/5 border-l border-[var(--border)] bg-[var(--bg)]">
                   <PDFPreview
-                    pdfPath={currentSession.pdf_path}
+                    pdfPath={firstPdfPath(currentSession?.pdf_path ?? null)}
                     currentPage={currentPdfPage}
                     onPageChange={setCurrentPdfPage}
                     onClose={() => setPdfPreviewOpen(false)}
@@ -461,7 +557,7 @@ export const AppShell: React.FC = () => {
       )}
 
       <SettingsPanel isOpen={settingsOpen} onClose={toggleSettings} />
-      <ExportPanel isOpen={exportOpen} onClose={toggleExport} sessionId={currentSession?.id || null} />
+      <ExportPanel isOpen={exportOpen} onClose={toggleExport} sessionId={currentSession?.id || null} selectedIds={selectedTransactionIds} />
     </div>
   )
 }

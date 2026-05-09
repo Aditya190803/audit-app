@@ -21,12 +21,11 @@ export const KeyboardShortcuts: React.FC = () => {
   useHotkeys('ctrl+shift+r', (e) => { e.preventDefault(); goHome() })
 
   const handleBulkTag = async (tagType: string) => {
-    const { addTag } = await import('../lib/api')
+    const { bulkAddTags } = await import('../lib/api')
     const { refreshCurrentSession } = useSessionStore.getState()
     const { selectedTransactionIds, clearSelection } = useUIStore.getState()
-    for (const txId of selectedTransactionIds) {
-      try { await addTag(txId, tagType) } catch (e) { /* ignore */ }
-    }
+    if (selectedTransactionIds.length === 0) return
+    await bulkAddTags(selectedTransactionIds, tagType)
     await refreshCurrentSession()
     clearSelection()
   }

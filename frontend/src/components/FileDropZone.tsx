@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Upload, FileText, FileSpreadsheet, Lock, X, ArrowRight, ChevronDown, Search, Check, FolderOpen, FileIcon, RefreshCw, Building2 } from 'lucide-react'
+import { FileText, FileSpreadsheet, Lock, X, ArrowRight, ChevronDown, Search, Check, FolderOpen, FileIcon, RefreshCw, Building2 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { getParsers } from '../lib/api'
 
@@ -76,6 +76,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [isEncrypted, setIsEncrypted] = useState(false)
+  const [invalidPdfNames, setInvalidPdfNames] = useState<string[]>([])
   const [threshold, setThreshold] = useState<number>(50000)
   const [sheetName, setSheetName] = useState('')
   const [sheetNames, setSheetNames] = useState<string[]>([])
@@ -243,23 +244,43 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
     return () => { cancelled = true }
   }, [clientListFile, apCodeColumn, sheetName, apCodeEnabled, excelWorkbook])
 
-  // Detect if first PDF is encrypted
+  // Validate PDF headers + detect encryption
   useEffect(() => {
     if (pdfFiles.length === 0) {
       setIsEncrypted(false)
       setShowPassword(false)
+      setInvalidPdfNames([])
       return
     }
-    const f = pdfFiles[0]
-    const blob = f.slice(Math.max(0, f.size - 8192))
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      const text = e.target?.result as string
-      const encrypted = text.includes('/Encrypt')
-      setIsEncrypted(encrypted)
-      if (encrypted) setShowPassword(true)
+    let encFound = false
+    let completed = 0
+    const badNames: string[] = []
+    for (const f of pdfFiles) {
+      // Check header for %PDF magic bytes
+      const headerBlob = f.slice(0, 4)
+      const headerReader = new FileReader()
+      headerReader.onload = (he) => {
+        const head = he.target?.result as string
+        if (head !== '%PDF') {
+          badNames.push(f.name)
+        }
+        // Then check trailer for encryption
+        const trailerBlob = f.slice(Math.max(0, f.size - 8192))
+        const trailerReader = new FileReader()
+        trailerReader.onload = (te) => {
+          const text = te.target?.result as string
+          if (text.includes('/Encrypt')) encFound = true
+          completed++
+          if (completed === pdfFiles.length) {
+            setInvalidPdfNames(badNames)
+            setIsEncrypted(encFound)
+            if (encFound) setShowPassword(true)
+          }
+        }
+        trailerReader.readAsText(trailerBlob)
+      }
+      headerReader.readAsText(headerBlob)
     }
-    reader.readAsText(blob)
   }, [pdfFiles])
 
   // Close broker dropdown on outside click
@@ -399,7 +420,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
     }
   }
 
-  const isReady = pdfFiles.length > 0 && clientListFile && !isProcessing && nameColumn.trim().length > 0
+  const isReady = pdfFiles.length > 0 && clientListFile && !isProcessing && nameColumn.trim().length > 0 && invalidPdfNames.length === 0
 
   const getClientListLabel = (file: File) => {
     if (file.name.endsWith('.csv')) return 'CSV'
@@ -496,37 +517,49 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
         </div>
       </div>
 
+      {/* Invalid PDF warning */}
+      {invalidPdfNames.length > 0 && (
+        <div className="p-3 bg-[var(--danger-subtle)] border border-[var(--danger)]/30 rounded-[var(--radius-md)] text-xs text-[var(--danger)]">
+          Invalid PDF{invalidPdfNames.length > 1 ? 's' : ''}: {invalidPdfNames.join(', ')} — file header does not start with %PDF
+        </div>
+      )}
+
       {/* File list */}
       {(pdfFiles.length > 0 || clientListFile) && (
         <div className="space-y-2">
-          {pdfFiles.map((f, i) => (
-            <div key={i} className="flex items-center gap-3 py-2">
-              <FileText className="h-4 w-4 text-[var(--danger)] shrink-0" strokeWidth={1.5} />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-[var(--text-primary)] truncate">{f.name}</p>
-                <p className="text-xs text-[var(--text-tertiary)]">{formatFileSize(f.size)}</p>
-              </div>
-              {i === 0 && isEncrypted && (
+          {pdfFiles.map((f, i) => {
+            const isInvalid = invalidPdfNames.includes(f.name)
+            return (
+              <div key={i} className={`flex items-center gap-3 py-2 ${isInvalid ? 'opacity-50' : ''}`}>
+                <FileText className={`h-4 w-4 shrink-0 ${isInvalid ? 'text-[var(--danger)]' : 'text-[var(--danger)]'}`} strokeWidth={1.5} />
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-medium truncate ${isInvalid ? 'text-[var(--danger)] line-through' : 'text-[var(--text-primary)]'}`}>
+                    {f.name}
+                  </p>
+                  <p className="text-xs text-[var(--text-tertiary)]">{formatFileSize(f.size)}{isInvalid ? ' — invalid PDF' : ''}</p>
+                </div>
+                {i === 0 && isEncrypted && (
+                  <button
+                    onClick={() => setShowPassword(!showPassword)}
+                    className={`p-1.5 rounded-[var(--radius-sm)] transition-colors duration-150 ${showPassword ? 'text-[var(--primary)]' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'}`}
+                    title="Password protected"
+                  >
+                    <Lock className="h-3.5 w-3.5" strokeWidth={2} />
+                  </button>
+                )}
                 <button
-                  onClick={() => setShowPassword(!showPassword)}
-                  className={`p-1.5 rounded-[var(--radius-sm)] transition-colors duration-150 ${showPassword ? 'text-[var(--primary)]' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'}`}
-                  title="Password protected"
+                  onClick={() => {
+                    const next = pdfFiles.filter((_, j) => j !== i)
+                    setPdfFiles(next)
+                    if (next.length === 0) { setPassword(''); setShowPassword(false); setIsEncrypted(false); setInvalidPdfNames([]) }
+                  }}
+                  className="p-1 text-[var(--text-tertiary)] hover:text-[var(--danger)] transition-colors duration-150"
                 >
-                  <Lock className="h-3.5 w-3.5" strokeWidth={2} />
+                  <X className="h-3.5 w-3.5" strokeWidth={2} />
                 </button>
-              )}
-              <button
-                onClick={() => {
-                  const next = pdfFiles.filter((_, j) => j !== i)
-                  setPdfFiles(next)
-                  if (next.length === 0) { setPassword(''); setShowPassword(false); setIsEncrypted(false) }
-                }}
-                className="p-1 text-[var(--text-tertiary)] hover:text-[var(--danger)] transition-colors duration-150"
-              >
-                <X className="h-3.5 w-3.5" strokeWidth={2} />
-              </button>
-            </div>
-          ))}
+              </div>
+            )
+          })}
 
           {showPassword && pdfFiles.length > 0 && (
             <input

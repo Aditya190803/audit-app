@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useState, useRef, useEffect } from 'react'
 import {
   useReactTable,
   getCoreRowModel,
@@ -6,9 +6,10 @@ import {
   getFilteredRowModel,
   flexRender,
   type SortingState,
-  type ColumnDef
+  type ColumnDef,
+  type VisibilityState
 } from '@tanstack/react-table'
-import { ArrowUpDown, ArrowUp, ArrowDown, CheckSquare, Square } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, CheckSquare, Square, Columns, ChevronDown, Check } from 'lucide-react'
 import type { Transaction } from '../types/api'
 import { TagBadgeList } from './TagBadge'
 
@@ -24,6 +25,28 @@ interface DataTableProps {
   maxAmount: number | null
 }
 
+const STORAGE_KEY = 'datatable_visible_columns'
+
+function loadVisibility(): VisibilityState {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch { return {} }
+}
+
+function saveVisibility(state: VisibilityState) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+}
+
+const ALL_COLUMNS = [
+  { id: 'select', label: '', alwaysOn: true },
+  { id: 'date', label: 'Date' },
+  { id: 'description', label: 'Description' },
+  { id: 'amount', label: 'Amount' },
+  { id: 'tags', label: 'Tag' },
+  { id: 'page_number', label: 'Page' },
+]
+
 export const DataTable: React.FC<DataTableProps> = ({
   transactions,
   selectedIds,
@@ -36,6 +59,21 @@ export const DataTable: React.FC<DataTableProps> = ({
   maxAmount
 }) => {
   const [sorting, setSorting] = useState<SortingState>([])
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(loadVisibility)
+  const [colsOpen, setColsOpen] = useState(false)
+  const colsRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (colsRef.current && !colsRef.current.contains(e.target as Node)) {
+        setColsOpen(false)
+      }
+    }
+    if (colsOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [colsOpen])
 
   const filteredData = useMemo(() => {
     return transactions.filter((tx) => {
@@ -48,8 +86,8 @@ export const DataTable: React.FC<DataTableProps> = ({
         const txTags = tx.tags.map((t) => t.tag_type)
         if (!filterTags.some((ft) => txTags.includes(ft))) return false
       }
-      if (minAmount !== null && tx.amount !== null && Math.abs(tx.amount) < minAmount) return false
-      if (maxAmount !== null && tx.amount !== null && Math.abs(tx.amount) > maxAmount) return false
+      if (minAmount !== null && tx.amount !== null && tx.amount < minAmount) return false
+      if (maxAmount !== null && tx.amount !== null && tx.amount > maxAmount) return false
       return true
     })
   }, [transactions, searchQuery, filterTags, minAmount, maxAmount])
@@ -76,6 +114,7 @@ export const DataTable: React.FC<DataTableProps> = ({
       size: 40
     },
     {
+      id: 'date',
       accessorKey: 'date',
       header: 'Date',
       cell: (info) => (
@@ -86,6 +125,7 @@ export const DataTable: React.FC<DataTableProps> = ({
       size: 100
     },
     {
+      id: 'description',
       accessorKey: 'party_name',
       header: 'Description',
       cell: (info) => {
@@ -104,6 +144,7 @@ export const DataTable: React.FC<DataTableProps> = ({
       size: 320
     },
     {
+      id: 'amount',
       accessorKey: 'amount',
       header: ({ column }) => (
         <button
@@ -123,6 +164,7 @@ export const DataTable: React.FC<DataTableProps> = ({
       size: 140
     },
     {
+      id: 'tags',
       accessorKey: 'tags',
       header: () => <span className="text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider">Tag</span>,
       cell: (info) => {
@@ -149,14 +191,30 @@ export const DataTable: React.FC<DataTableProps> = ({
         )
       },
       size: 160
+    },
+    {
+      id: 'page_number',
+      accessorKey: 'page_number',
+      header: 'Page',
+      cell: (info) => (
+        <span className="text-xs text-[var(--text-tertiary)] font-mono">
+          {info.getValue() != null ? String(info.getValue()) : '-'}
+        </span>
+      ),
+      size: 60
     }
   ], [selectedIds, onSelectTransaction, onRemoveTag, onAddTag])
 
   const table = useReactTable({
     data: filteredData,
     columns,
-    state: { sorting },
+    state: { sorting, columnVisibility },
     onSortingChange: setSorting,
+    onColumnVisibilityChange: (updater) => {
+      setColumnVisibility(updater)
+      const next = typeof updater === 'function' ? updater(columnVisibility) : updater
+      saveVisibility(next)
+    },
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel()
@@ -172,40 +230,89 @@ export const DataTable: React.FC<DataTableProps> = ({
     )
   }
 
+  const visibleCount = ALL_COLUMNS.filter(c => c.alwaysOn || columnVisibility[c.id] !== false).length
+
   return (
-    <table className="w-full text-left border-collapse">
-      <thead>
-        {table.getHeaderGroups().map((hg) => (
-          <tr key={hg.id} className="border-b border-[var(--border)]">
-            {hg.headers.map((header) => (
-              <th
-                key={header.id}
-                className="px-3 py-2.5 text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider whitespace-nowrap"
-                style={{ width: header.getSize() }}
-              >
-                {flexRender(header.column.columnDef.header, header.getContext())}
-              </th>
-            ))}
-          </tr>
-        ))}
-      </thead>
-      <tbody className="divide-y divide-[var(--border)]">
-        {table.getRowModel().rows.map((row) => (
-          <tr
-            key={row.id}
-            onClick={() => onSelectTransaction(row.original.id)}
-            className={`group cursor-pointer transition-colors duration-150 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-              selectedIds.includes(row.original.id) ? 'bg-[var(--primary-subtle)]' : 'hover:bg-[var(--surface-hover)]'
-            }`}
+    <div className="h-full flex flex-col">
+      {/* Column visibility toolbar */}
+      <div className="flex items-center justify-end px-3 py-1.5 border-b border-[var(--border)] bg-[var(--surface)]">
+        <div className="relative" ref={colsRef}>
+          <button
+            onClick={() => setColsOpen(o => !o)}
+            className="flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium text-[var(--text-tertiary)] hover:text-[var(--text-primary)] rounded-[var(--radius-sm)] hover:bg-[var(--surface-hover)] transition-colors"
           >
-            {row.getVisibleCells().map((cell) => (
-              <td key={cell.id} className="px-3 py-2">
-                {flexRender(cell.column.columnDef.cell, cell.getContext())}
-              </td>
+            <Columns className="h-3.5 w-3.5" strokeWidth={1.5} />
+            Columns
+            <ChevronDown className={`h-3 w-3 transition-transform ${colsOpen ? 'rotate-180' : ''}`} strokeWidth={2} />
+          </button>
+          {colsOpen && (
+            <div className="absolute right-0 top-full mt-1 z-20 min-w-[160px] bg-white border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-md)] overflow-hidden">
+              {ALL_COLUMNS.filter(c => !c.alwaysOn).map((col) => {
+                const isVisible = columnVisibility[col.id] !== false
+                return (
+                  <button
+                    key={col.id}
+                    onClick={() => {
+                      setColumnVisibility(prev => {
+                        const next = { ...prev, [col.id]: !isVisible }
+                        saveVisibility(next)
+                        return next
+                      })
+                    }}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors duration-150 ${
+                      isVisible ? 'text-[var(--text-primary)]' : 'text-[var(--text-tertiary)]'
+                    } hover:bg-[var(--surface-hover)]`}
+                  >
+                    <span className={`h-4 w-4 rounded-[var(--radius-sm)] border flex items-center justify-center shrink-0 transition-colors ${
+                      isVisible ? 'border-[var(--primary)] bg-[var(--primary)]' : 'border-[var(--border-strong)]'
+                    }`}>
+                      {isVisible && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
+                    </span>
+                    {col.label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            {table.getHeaderGroups().map((hg) => (
+              <tr key={hg.id} className="border-b border-[var(--border)]">
+                {hg.headers.map((header) => (
+                  <th
+                    key={header.id}
+                    className="px-3 py-2.5 text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider whitespace-nowrap"
+                    style={{ width: header.getSize() }}
+                  >
+                    {flexRender(header.column.columnDef.header, header.getContext())}
+                  </th>
+                ))}
+              </tr>
             ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+          </thead>
+          <tbody className="divide-y divide-[var(--border)]">
+            {table.getRowModel().rows.map((row) => (
+              <tr
+                key={row.id}
+                onClick={() => onSelectTransaction(row.original.id)}
+                className={`group cursor-pointer transition-colors duration-150 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
+                  selectedIds.includes(row.original.id) ? 'bg-[var(--primary-subtle)]' : 'hover:bg-[var(--surface-hover)]'
+                }`}
+              >
+                {row.getVisibleCells().map((cell) => (
+                  <td key={cell.id} className="px-3 py-2">
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
 }

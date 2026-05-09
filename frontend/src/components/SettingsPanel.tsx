@@ -12,6 +12,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
   const [localSettings, setLocalSettings] = useState<Record<string, unknown>>({})
   const [newBroker, setNewBroker] = useState('')
   const [brokers, setBrokers] = useState<string[]>([])
+  const [newKeyword, setNewKeyword] = useState('')
+  const [keywords, setKeywords] = useState<string[]>([])
 
   useEffect(() => {
     if (isOpen) loadSettings()
@@ -20,12 +22,25 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
   useEffect(() => {
     setLocalSettings(settings)
     setBrokers((settings.broker_list as string[]) || [])
+    setKeywords((settings.suspicious_keywords as string[]) || [])
   }, [settings])
 
   if (!isOpen) return null
 
+  const addKeyword = () => {
+    const kw = newKeyword.trim().toLowerCase()
+    if (kw && !keywords.includes(kw)) {
+      setKeywords([...keywords, kw])
+      setNewKeyword('')
+    }
+  }
+
+  const removeKeyword = (kw: string) => {
+    setKeywords(keywords.filter((k) => k !== kw))
+  }
+
   const handleSave = async () => {
-    await updateSettings({ ...localSettings, broker_list: brokers })
+    await updateSettings({ ...localSettings, broker_list: brokers, suspicious_keywords: keywords })
     onClose()
   }
 
@@ -139,6 +154,43 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
               ))}
               {brokers.length === 0 && (
                 <div className="text-xs text-[var(--text-tertiary)] py-2 text-center">No brokers configured</div>
+              )}
+            </div>
+          </div>
+
+          {/* Suspicious Keywords */}
+          <div>
+            <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">Suspicious Keywords</label>
+            <div className="flex gap-2 mb-2">
+              <input
+                type="text"
+                value={newKeyword}
+                onChange={(e) => setNewKeyword(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addKeyword()}
+                placeholder="Add keyword..."
+                className="input-field flex-1"
+              />
+              <button
+                onClick={addKeyword}
+                className="btn-primary px-2.5"
+              >
+                <Plus className="h-4 w-4" strokeWidth={2} />
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1.5 p-2 border border-[var(--border)] rounded-[var(--radius-md)] min-h-[48px]">
+              {keywords.map((kw) => (
+                <span key={kw} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium bg-[var(--danger-subtle)] text-[var(--danger)] rounded-[var(--radius-sm)]">
+                  {kw}
+                  <button
+                    onClick={() => removeKeyword(kw)}
+                    className="hover:brightness-75 transition-all"
+                  >
+                    <X className="h-2.5 w-2.5" strokeWidth={3} />
+                  </button>
+                </span>
+              ))}
+              {keywords.length === 0 && (
+                <span className="text-xs text-[var(--text-tertiary)] py-1">No keywords configured. Transactions will only be flagged by amount threshold.</span>
               )}
             </div>
           </div>

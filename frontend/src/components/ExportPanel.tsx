@@ -7,15 +7,22 @@ interface ExportPanelProps {
   isOpen: boolean
   onClose: () => void
   sessionId: number | null
+  selectedIds?: number[]
 }
 
-const EXPORT_TYPES: { value: ExportType; label: string }[] = [
-  { value: 'all', label: 'All Transactions' },
-  { value: 'client', label: 'Client' },
-  { value: 'broker', label: 'Broker' },
-  { value: 'suspicious', label: 'Suspicious' },
-  { value: 'tagged', label: 'All Tagged' }
-]
+function getExportTypes(selectedCount: number): { value: string; label: string }[] {
+  const types = [
+    { value: 'all', label: 'All Transactions' },
+    { value: 'client', label: 'Client' },
+    { value: 'broker', label: 'Broker' },
+    { value: 'suspicious', label: 'Suspicious' },
+    { value: 'tagged', label: 'All Tagged' }
+  ]
+  if (selectedCount > 0) {
+    types.unshift({ value: 'selected', label: `Selected (${selectedCount})` })
+  }
+  return types
+}
 
 const EXPORT_FORMATS: { value: ExportFormat; label: string; icon: React.ReactNode }[] = [
   { value: 'csv', label: 'CSV', icon: <FileText className="h-4 w-4" strokeWidth={1.5} /> },
@@ -24,11 +31,13 @@ const EXPORT_FORMATS: { value: ExportFormat; label: string; icon: React.ReactNod
   { value: 'pdf-report', label: 'PDF Report', icon: <FileImage className="h-4 w-4" strokeWidth={1.5} /> }
 ]
 
-export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessionId }) => {
-  const [selectedType, setSelectedType] = useState<ExportType>('all')
+export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessionId, selectedIds }) => {
+  const exportTypes = getExportTypes(selectedIds?.length || 0)
+  const [selectedType, setSelectedType] = useState(exportTypes[0]?.value || 'all')
   const [selectedFormat, setSelectedFormat] = useState<ExportFormat>('csv')
   const [isExporting, setIsExporting] = useState(false)
 
+  // Reset to first option when selectedIds change
   if (!isOpen) return null
 
   const handleExport = async () => {
@@ -38,14 +47,16 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessi
       const { showSaveDialog } = window.electronAPI
       const defaultExt = selectedFormat === 'csv' ? 'csv' : selectedFormat === 'excel' ? 'xlsx' : 'pdf'
       const filters = [{ name: defaultExt.toUpperCase(), extensions: [defaultExt] }]
+      const isSelected = selectedType === 'selected'
+      const effectiveType = isSelected ? 'all' : selectedType
 
       const result = await showSaveDialog({
-        defaultPath: `export_${selectedType}.${defaultExt}`,
+        defaultPath: `export_${isSelected ? 'selected' : selectedType}.${defaultExt}`,
         filters
       })
 
       if (!result.canceled && result.filePath) {
-        await exportFile(sessionId, selectedType, selectedFormat, result.filePath)
+        await exportFile(sessionId, effectiveType, selectedFormat, result.filePath, isSelected ? selectedIds : undefined)
         onClose()
       }
     } catch (e) {
@@ -73,7 +84,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessi
           <div>
             <label className="block text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider mb-2">Export Type</label>
             <div className="grid grid-cols-1 gap-1">
-              {EXPORT_TYPES.map((type) => (
+              {exportTypes.map((type) => (
                 <button
                   key={type.value}
                   onClick={() => setSelectedType(type.value)}
