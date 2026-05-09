@@ -147,6 +147,12 @@ class BankProfileResponse(BankProfileBase):
     class Config:
         from_attributes = True
 
+class BulkTagRequest(BaseModel):
+    transaction_ids: List[int]
+    tag_type: TagType
+    reason: Optional[str] = None
+    confidence: float = 1.0
+
 class ParseRequest(BaseModel):
     pdf_path: str
     csv_path: str
