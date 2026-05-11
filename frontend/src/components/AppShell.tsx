@@ -34,6 +34,14 @@ import { ExportPanel } from './ExportPanel'
 import { PDFPreview } from './PDFPreview'
 import { KeyboardShortcuts } from './KeyboardShortcuts'
 import { ToastContainer } from './Toast'
+import {
+  addTag,
+  bulkAddTags,
+  bulkRemoveTags,
+  getTags,
+  removeTag,
+  renameSession
+} from '../lib/api'
 
 type ResultFilter = 'all' | 'client' | 'broker' | 'suspicious'
 
@@ -151,7 +159,6 @@ export const AppShell: React.FC = () => {
     if (renameId === null) return
     const val = renameValue.trim()
     if (val) {
-      const { renameSession } = await import('../lib/api')
       await renameSession(renameId, val)
       await loadSessions()
       if (currentSession?.id === renameId) {
@@ -189,13 +196,11 @@ export const AppShell: React.FC = () => {
   }
 
   const handleRemoveTag = async (tagId: number) => {
-    const { removeTag } = await import('../lib/api')
     await removeTag(tagId)
     await refreshCurrentSession()
   }
 
   const handleAddTag = async (transactionId: number, tagType: string) => {
-    const { getTags, addTag, bulkRemoveTags } = await import('../lib/api')
     const { pushToast } = useUIStore.getState()
     const existing = await getTags(transactionId)
     const prevTags = existing.data.map((t) => ({ id: t.id, tag_type: t.tag_type, source: t.source, is_manual: t.is_manual, reason: t.reason }))
@@ -210,12 +215,11 @@ export const AppShell: React.FC = () => {
       action: {
         label: 'Undo',
         onClick: async () => {
-          const { getTags: gt, bulkRemoveTags: brt, addTag: at } = await import('../lib/api')
-          const current = await gt(transactionId)
-          const currentIds = current.data.map((t: any) => t.id)
-          if (currentIds.length > 0) await brt(currentIds)
+          const current = await getTags(transactionId)
+          const currentIds = current.data.map((t) => t.id)
+          if (currentIds.length > 0) await bulkRemoveTags(currentIds)
           for (const pt of prevTags) {
-            await at(transactionId, pt.tag_type, pt.reason, undefined, pt.source, pt.is_manual)
+            await addTag(transactionId, pt.tag_type, pt.reason ?? undefined, undefined, pt.source, pt.is_manual)
           }
           await refreshCurrentSession()
         }
@@ -224,7 +228,6 @@ export const AppShell: React.FC = () => {
   }
 
   const handleBulkTag = async (tagType: string) => {
-    const { bulkAddTags } = await import('../lib/api')
     if (selectedTransactionIds.length === 0) return
     await bulkAddTags(selectedTransactionIds, tagType)
     clearSelection()
@@ -561,5 +564,3 @@ export const AppShell: React.FC = () => {
     </div>
   )
 }
-
-

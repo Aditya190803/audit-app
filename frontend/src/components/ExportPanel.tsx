@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { X, Download, FileSpreadsheet, FileText, FileImage } from 'lucide-react'
-import type { ExportType, ExportFormat } from '../types/api'
+import type { ExportFormat } from '../types/api'
 import { exportFile } from '../lib/api'
 
 interface ExportPanelProps {

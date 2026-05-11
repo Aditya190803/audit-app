@@ -10,7 +10,7 @@ import {
   type VisibilityState
 } from '@tanstack/react-table'
 import { ArrowUpDown, ArrowUp, ArrowDown, CheckSquare, Square, Columns, ChevronDown, Check } from 'lucide-react'
-import type { Transaction } from '../types/api'
+import type { Tag, Transaction } from '../types/api'
 import { formatTagReason, TagBadgeList } from './TagBadge'
 
 interface DataTableProps {
@@ -18,7 +18,7 @@ interface DataTableProps {
   selectedIds: number[]
   onSelectTransaction: (id: number, multi?: boolean) => void
   onRemoveTag: (tagId: number) => void
-  onAddTag: (transactionId: number, tagType: string) => void
+  onAddTag: (transactionId: number, tagType: Tag['tag_type']) => void
   searchQuery: string
   filterTags: string[]
   minAmount: number | null
@@ -85,7 +85,7 @@ export const DataTable: React.FC<DataTableProps> = ({
       }
       if (filterTags.length > 0) {
         const txTags = tx.tags.map((t) => t.tag_type)
-        if (!filterTags.some((ft) => txTags.includes(ft))) return false
+        if (!filterTags.some((ft) => txTags.some((tag) => tag === ft))) return false
       }
       if (minAmount !== null && tx.amount !== null && tx.amount < minAmount) return false
       if (maxAmount !== null && tx.amount !== null && tx.amount > maxAmount) return false
@@ -244,8 +244,6 @@ export const DataTable: React.FC<DataTableProps> = ({
       </div>
     )
   }
-
-  const visibleCount = ALL_COLUMNS.filter(c => c.alwaysOn || columnVisibility[c.id] !== false).length
 
   return (
     <div className="h-full flex flex-col">

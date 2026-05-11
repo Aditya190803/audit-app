@@ -2,9 +2,10 @@ import React from 'react'
 import { useHotkeys } from 'react-hotkeys-hook'
 import { useUIStore } from '../stores/uiStore'
 import { useSessionStore } from '../stores/sessionStore'
+import { bulkAddTags } from '../lib/api'
 
 export const KeyboardShortcuts: React.FC = () => {
-  const { toggleSidebar, toggleSettings, toggleExport, selectedTransactionIds, clearSelection, goHome, setShowNewAudit } = useUIStore()
+  const { toggleSidebar, toggleSettings, toggleExport, selectedTransactionIds, goHome, setShowNewAudit } = useUIStore()
   const { refreshCurrentSession, currentSession } = useSessionStore()
 
   useHotkeys('esc', (e) => { e.preventDefault(); goHome() })
@@ -21,7 +22,6 @@ export const KeyboardShortcuts: React.FC = () => {
   useHotkeys('ctrl+shift+r', (e) => { e.preventDefault(); goHome() })
 
   const handleBulkTag = async (tagType: string) => {
-    const { bulkAddTags } = await import('../lib/api')
     const { refreshCurrentSession } = useSessionStore.getState()
     const { selectedTransactionIds, clearSelection } = useUIStore.getState()
     if (selectedTransactionIds.length === 0) return
