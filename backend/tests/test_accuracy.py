@@ -103,6 +103,59 @@ class AccuracyTests(unittest.TestCase):
         self.assertEqual(fuzzy.match_broker_names("GAURAV CH", BROKERS), [])
         self.assertEqual(fuzzy.match_broker_names("ZERODHA BROKING", BROKERS)[0]["original"], "ZERODHA BROKING LIMITED")
 
+    def test_broker_matching_rejects_bank_only_counterparties(self):
+        fuzzy = FuzzyService(0.75)
+        self.assertEqual(fuzzy.match_broker_names("AXIS BANK", BROKERS), [])
+        self.assertEqual(fuzzy.match_broker_names("KOTAK MAHINDRA BANK", BROKERS), [])
+        self.assertEqual(fuzzy.match_broker_names("ICICI BANK LIMITED", BROKERS), [])
+
+    def test_broker_matching_keeps_distinctive_broker_entities(self):
+        fuzzy = FuzzyService(0.75)
+        self.assertIn(
+            fuzzy.match_broker_names("KOTAK SECURITIES LIMITED NSE CLI", BROKERS)[0]["original"],
+            {"KOTAK SECURITIES", "KOTAK SECURITIES LIMITED"},
+        )
+        self.assertEqual(
+            fuzzy.match_broker_names("UPSTOX SECURITIES PRIVATE LIMITED", BROKERS)[0]["original"],
+            "UPSTOX SECURITIES PRIVATE LIMITED",
+        )
+        self.assertEqual(
+            fuzzy.match_broker_names("ANGEL ONE LIMITED", BROKERS)[0]["original"],
+            "ANGEL ONE LIMITED",
+        )
+
+    def test_broker_matching_handles_truncated_entity_words_and_short_display_names(self):
+        fuzzy = FuzzyService(0.75)
+        self.assertEqual(
+            fuzzy.match_broker_names("RAISE SECURITIE", BROKERS)[0]["original"],
+            "RAISE SECURITIES PRIVATE LIMITED",
+        )
+        self.assertEqual(
+            fuzzy.match_broker_names("Raise Se", BROKERS)[0]["original"],
+            "RAISE SECURITIES PRIVATE LIMITED",
+        )
+        self.assertEqual(
+            fuzzy.match_broker_names("RAISE SECURITIE AT 60015 SIHOR", BROKERS)[0]["original"],
+            "RAISE SECURITIES PRIVATE LIMITED",
+        )
+
+    def test_broker_matching_handles_concatenated_broker_names(self):
+        fuzzy = FuzzyService(0.75)
+        narration = "RTGS-HDFCR52026010352880424- SMCGLOBALSECURITIESLTDDSCN5218- 57500001265218-HDFC0000240"
+        self.assertEqual(
+            fuzzy.match_broker_names(narration, BROKERS)[0]["original"],
+            "SMC GLOBAL SECURITIES LIMITED",
+        )
+        self.assertEqual(
+            fuzzy.match_broker_names("SMCGLOBALSECURITIESLTDDSCN5218", BROKERS)[0]["original"],
+            "SMC GLOBAL SECURITIES LIMITED",
+        )
+
+    def test_broker_matching_rejects_person_only_registered_names_without_broker_context(self):
+        fuzzy = FuzzyService(0.75)
+        self.assertEqual(fuzzy.match_broker_names("AJAY GUPTA", BROKERS), [])
+        self.assertEqual(fuzzy.match_broker_names("AMIT SAHITA", BROKERS), [])
+
     def test_icici_numbered_uses_balance_delta_for_sign(self):
         parser = ICICINumberedParser()
         txs = parser._apply_balance_signs([

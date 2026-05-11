@@ -24,9 +24,19 @@ BROKER_ENTITY_WORDS = {
     "capital", "wealth", "markets", "equities", "investment", "investments",
 }
 
+BROKER_BRAND_TOKENS = {
+    "zerodha", "angel", "angelone", "upstox", "groww", "5paisa",
+    "sharekhan", "motilal", "oswal", "iifl", "geojit", "icici",
+    "hdfcsec", "kotaksec", "edelweiss", "nuvama",
+}
+
 BANK_ONLY_TOKENS = {
     "bank", "mahindra", "kotak", "icici", "hdfc", "sbi", "state", "union",
     "axis", "yes", "federal", "idfc", "indusind", "baroda", "punjab",
+}
+
+BANK_COUNTERPARTY_TOKENS = BANK_ONLY_TOKENS | {
+    "limited", "ltd", "private", "pvt", "first",
 }
 
 TRANSACTION_NOISE_TOKENS = {
@@ -217,48 +227,156 @@ class FuzzyService:
         
         return filtered
     
-    def _get_significant_tokens(self, name: str, common_words: set = None) -> set:
+    def _get_significant_tokens(self, name: str, common_words: set = None, *, for_broker: bool = False) -> set:
         """Extract tokens from a name, excluding common corporate words."""
         if common_words is None:
             common_words = COMMON_WORDS
         tokens = set(self.normalize_text(name).split())
-        return {t for t in tokens if t not in common_words and len(t) >= 3}
+        ignored = set(common_words)
+        if for_broker:
+            ignored |= TRANSACTION_NOISE_TOKENS | {"limited", "ltd", "private", "pvt"}
+            if not (tokens & BROKER_ENTITY_WORDS):
+                ignored |= BANK_ONLY_TOKENS
+        return {t for t in tokens if t not in ignored and len(t) >= 3}
+
+    def _is_person_like_broker_name(self, broker_name: str) -> bool:
+        tokens = [
+            t for t in self.normalize_text(broker_name).split()
+            if t not in COMMON_WORDS and t not in BROKER_ENTITY_WORDS and t not in BANK_ONLY_TOKENS
+        ]
+        if not tokens:
+            return False
+        broker_tokens = set(self.normalize_text(broker_name).split())
+        if broker_tokens & BROKER_ENTITY_WORDS:
+            return False
+        if broker_tokens & BROKER_BRAND_TOKENS:
+            return False
+        return len(tokens) <= 4 and all(t.isalpha() for t in tokens)
+
+    def _broker_entity_evidence(self, text_tokens: List[str], broker_tokens: List[str]) -> bool:
+        """Detect exact, fuzzy, or abbreviated broker entity words."""
+        broker_entities = set(broker_tokens) & BROKER_ENTITY_WORDS
+        if not broker_entities:
+            return False
+
+        for entity in broker_entities:
+            for token in text_tokens:
+                if token in TRANSACTION_NOISE_TOKENS or token in BANK_ONLY_TOKENS:
+                    continue
+                if token == entity:
+                    return True
+                if len(token) >= 5 and fuzz.ratio(entity, token) / 100.0 >= 0.88:
+                    return True
+                if 2 <= len(token) <= 4 and entity.startswith(token):
+                    return True
+        return False
+
+    def _broker_compact_evidence(self, text: str, broker_name: str, common_words: set = None) -> bool:
+        """Detect broker names collapsed into one narration token.
+
+        Example: SMC GLOBAL SECURITIES LIMITED may appear as
+        SMCGLOBALSECURITIESLTDDSCN5218. This requires the broker's distinctive
+        token sequence plus entity context, so generic suffixes alone cannot hit.
+        """
+        if common_words is None:
+            common_words = COMMON_WORDS
+
+        broker_tokens = self.normalize_text(broker_name).split()
+        meaningful = [
+            t for t in broker_tokens
+            if t not in {"limited", "ltd", "private", "pvt"}
+            and t not in TRANSACTION_NOISE_TOKENS
+            and len(t) >= 3
+        ]
+        if len(meaningful) < 2 or not (set(meaningful) & BROKER_ENTITY_WORDS):
+            return False
+
+        distinctive = [
+            t for t in meaningful
+            if t not in BROKER_ENTITY_WORDS and t not in BANK_ONLY_TOKENS and t not in common_words
+        ]
+        if not distinctive:
+            return False
+
+        compact_text = re.sub(r"[^a-z0-9]", "", self.normalize_text(text))
+        if not compact_text:
+            return False
+
+        compact_name = "".join(meaningful)
+        if len(compact_name) >= 8 and compact_name in compact_text:
+            return True
+
+        # Some statements include just a brand/acronym plus the entity word.
+        for brand in distinctive:
+            for entity in set(meaningful) & BROKER_ENTITY_WORDS:
+                pair = f"{brand}{entity}"
+                if len(pair) >= 8 and pair in compact_text:
+                    return True
+
+        return False
 
     def _has_significant_match(self, text: str, broker_name: str, common_words: set = None) -> bool:
         """Check if text has a fuzzy match for at least one significant broker token."""
-        sig_broker = self._get_significant_tokens(broker_name, common_words)
+        if self._broker_compact_evidence(text, broker_name, common_words):
+            return True
+
+        sig_broker = self._get_significant_tokens(broker_name, common_words, for_broker=True)
         if not sig_broker:
             return False
         text_tokens = self.normalize_text(text).split()
         broker_tokens = self.normalize_text(broker_name).split()
-        has_entity_word = bool(set(text_tokens) & BROKER_ENTITY_WORDS)
+        broker_has_entity_word = bool(set(broker_tokens) & BROKER_ENTITY_WORDS)
+        has_entity_evidence = self._broker_entity_evidence(text_tokens, broker_tokens)
+        ignored_text_tokens = TRANSACTION_NOISE_TOKENS
+        if not broker_has_entity_word:
+            ignored_text_tokens = ignored_text_tokens | BANK_ONLY_TOKENS
+        clean_text_tokens = [
+            t for t in text_tokens
+            if t not in ignored_text_tokens and len(t) >= 3
+        ]
+        if not clean_text_tokens:
+            return False
+
+        has_entity_word = bool(set(text_tokens) & set(broker_tokens) & BROKER_ENTITY_WORDS)
+        has_entity_context = has_entity_word or has_entity_evidence
         strong_matches = []
+        exact_matches = []
         for sig in sig_broker:
-            for t in text_tokens:
+            for t in clean_text_tokens:
                 if len(t) < 3:
                     continue
                 # Use fuzzy ratio instead of exact match - "ABC" should match "ABCD" at 0.75
                 score = fuzz.ratio(sig, t) / 100.0
-                if score >= 0.75:
+                if score >= 0.88:
                     strong_matches.append(sig)
+                    if sig == t:
+                        exact_matches.append(sig)
                     break
 
         if not strong_matches:
             return False
 
+        if self._is_person_like_broker_name(broker_name) and not has_entity_context:
+            return False
+
         # Avoid matching ordinary person/merchant abbreviations such as
         # "GAURAV CH" to "GAURAV SHARES TRADING..." unless the transaction text
         # itself carries a broker/entity word.
-        if len(strong_matches) == 1 and len(sig_broker) > 1 and not has_entity_word:
+        if len(strong_matches) == 1 and len(sig_broker) > 1 and not has_entity_context:
             matched = strong_matches[0]
-            if matched not in {"zerodha", "angelone", "angel"}:
+            if matched not in BROKER_BRAND_TOKENS:
                 return False
 
         # If the broker name contains an entity word, prefer seeing either that
         # entity word or two pieces of distinctive evidence in the text.
-        broker_has_entity_word = bool(set(broker_tokens) & BROKER_ENTITY_WORDS)
+        if broker_has_entity_word and has_entity_evidence and strong_matches:
+            return True
+
         if broker_has_entity_word and not has_entity_word and len(strong_matches) < 2:
-            return strong_matches[0] in {"zerodha", "angelone", "angel"}
+            return strong_matches[0] in BROKER_BRAND_TOKENS
+
+        if not broker_has_entity_word and not has_entity_context:
+            return len(exact_matches) >= 2
 
         return True
 
@@ -271,7 +389,9 @@ class FuzzyService:
         token from the broker name appears in the text.
         """
         text_tokens = set(self.normalize_text(text).split())
-        if text_tokens and text_tokens <= BANK_ONLY_TOKENS:
+        if text_tokens and text_tokens <= BANK_COUNTERPARTY_TOKENS:
+            return []
+        if text_tokens and text_tokens <= (BANK_COUNTERPARTY_TOKENS | TRANSACTION_NOISE_TOKENS):
             return []
 
         if exclusions:
@@ -280,10 +400,26 @@ class FuzzyService:
         common_set = set(w.lower() for w in (common_words or [])) if common_words else COMMON_WORDS
         
         matches = self.find_matches(text, brokers)
+        matched_names = {m["original"] for m in matches}
+        for broker in brokers:
+            if broker in matched_names:
+                continue
+            if self._has_significant_match(text, broker, common_set):
+                score = max(
+                    fuzz.token_set_ratio(self.normalize_text(text), self.normalize_text(broker)) / 100.0,
+                    self.threshold,
+                )
+                matches.append({
+                    "original": broker,
+                    "score": round(min(score, 0.95), 3),
+                    "matched": True,
+                })
+
         filtered = []
         for m in matches:
             if self._has_significant_match(text, m["original"], common_set):
                 filtered.append(m)
+        filtered.sort(key=lambda x: x["score"], reverse=True)
         return filtered
     
     def batch_match(self, texts: List[str], candidates: List[str]) -> List[List[Dict[str, Any]]]:

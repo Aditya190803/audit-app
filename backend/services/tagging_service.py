@@ -220,10 +220,13 @@ class TaggingService:
                 # Check if the party text itself matches a client - if so, skip broker check
                 is_client_related = False
                 if broker_text:
+                    normalized_broker_text = self.fuzzy.normalize_text(broker_text)
                     for c in clients:
-                        if self.fuzzy.normalize_text(broker_text) == self.fuzzy.normalize_text(c["name"]):
+                        if normalized_broker_text == self.fuzzy.normalize_text(c["name"]):
                             is_client_related = True
                             break
+                    if not is_client_related:
+                        is_client_related = bool(self.fuzzy.match_client_names(broker_text, clients, alias_list))
                 
                 if not is_client_related:
                     broker_matches = self.fuzzy.match_broker_names(broker_text, broker_names, exclusions, common_words)
