@@ -61,31 +61,29 @@ class SBICompactParser(BaseParser):
             return None
 
         desc_cell = str(row[2] or "").strip()
-        description = " ".join(desc_cell.split()) if desc_cell else ""
+        description = " ".join(desc_cell.replace("\n", " ").split()) if desc_cell else ""
+
+        # Strip WDL TFR / DEP TFR prefixes from description for cleaner party extraction
+        clean_desc = re.sub(r'^(?:WDL|DEP)\s*TFR\s*', '', description, flags=re.IGNORECASE).strip()
 
         wd_raw = str(row[4] or "").strip()
         dp_raw = str(row[5] or "").strip()
 
-        wd_amount = self._parse_amount_cell(wd_raw) if wd_raw and wd_raw != "-" else None
-        dp_amount = self._parse_amount_cell(dp_raw) if dp_raw and dp_raw != "-" else None
-
-        amount = None
-        if wd_amount is not None and wd_amount != 0:
-            amount = wd_amount
-        elif dp_amount is not None and dp_amount != 0:
-            amount = dp_amount
-        elif wd_amount is not None:
-            amount = wd_amount
-        elif dp_amount is not None:
-            amount = dp_amount
+        amount = self._amount_from_debit_credit(wd_raw, dp_raw)
 
         if amount is None:
             return None
+
+        # "-" in withdrawal means it's a credit (already handled), skip zero rows
+        if wd_raw.strip() == "-" and dp_raw.strip() == "-":
+            return None
+
+        party = self._extract_party_from_description(clean_desc) or self._extract_party_from_description(description)
 
         return {
             "date": date,
             "amount": amount,
             "description": description,
-            "party_name": description,
+            "party_name": party or description,
             "raw_text": date_cell,
         }

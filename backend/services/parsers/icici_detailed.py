@@ -45,7 +45,7 @@ class ICICIDetailedParser(BaseParser):
         value_date_pattern = re.compile(
             r"^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$|^\d{1,2}\.\d{1,2}\.\d{2,4}$|^\d{1,2}\s+[A-Za-z]{3}\s+\d{4}$"
         )
-        amount_pattern = re.compile(r"[\d,]+\.\d{2}")
+        amount_pattern = re.compile(r"^\(?-?[\d,]+\.\d{1,2}\)?$")
 
         for table in tables:
             txns = self._parse_table(table, date_pattern, amount_pattern, value_date_pattern)
@@ -91,12 +91,13 @@ class ICICIDetailedParser(BaseParser):
 # Common bank names used to avoid tagging the intermediary bank as the party
     BANK_KEYWORDS = ['ICICI', 'HDFC', 'SBI', 'Axis Bank', 'Yes Bank', 'Kotak',
                      'Bank of India', 'Bank of Baroda', 'Union Bank', 'IndusInd',
-                     'IDFC', 'Federal Bank', 'State Bank', 'BOB', 'PNB']
+                     'IDFC', 'Federal Bank', 'State Bank', 'BOB', 'PNB',
+                     'Karnataka Bank', 'Canara Bank', 'Bank of Maharashtra']
 
     # Patterns for recognisable bank-named segments (used to avoid extracting
     # segments that are purely bank identifiers rather than counterparties)
     _BANK_RE = re.compile(
-        r'^(?:ICICI\s*Bank|HDFC\s*Bank|SBI|State\s*Bank|Axis\s*Bank|Yes\s*Bank|Kotak\s*Mahindra|Bank\s*of\s*(?:India|Baroda)|Union\s*Bank|IndusInd\s*Bank|IDFC\s*First?\s*Bank|Federal\s*Bank|PNB)\b',
+        r'^(?:ICICI\s*Bank|HDFC\s*Bank|SBI|State\s*Bank|Axis\s*Bank|Yes\s*Bank|Kotak\s*Mahindra|Bank\s*of\s*(?:India|Baroda|Maharashtra)|Union\s*Bank|IndusInd\s*Bank|IDFC\s*First?\s*Bank|Federal\s*Bank|PNB|Karnataka\s*Bank|Canara\s*Bank)\b',
         re.IGNORECASE
     )
 
@@ -129,6 +130,14 @@ class ICICIDetailedParser(BaseParser):
 
         # UPI patterns
         if desc.startswith('UPI/'):
+            # UPI/P2A/id/PARTY NAME/UPI/BANK (person-to-account)
+            m = re.search(r'P2[AM]\s*/\s*\d+\s*/\s*([^/]+)', desc, re.IGNORECASE)
+            if m:
+                candidate = m.group(1).strip()
+                candidate = re.sub(r'\s*/?\s*UPI\s*$', '', candidate).strip()
+                if candidate and not self._is_bank_segment(candidate) and not skip_generic(candidate):
+                    return clean(candidate)
+
             # UPI/{id}/Paying([A-Z][a-zA-Z0-9]+)/{vpa}/{bank}/{ref}
             m = re.search(r'Paying([A-Z][a-zA-Z0-9]+)', desc)
             if m:
@@ -209,11 +218,17 @@ class ICICIDetailedParser(BaseParser):
                     if candidate and not self._is_bank_segment(candidate) and not skip_generic(candidate):
                         return clean(candidate)
 
-        # BIL: BIL/{id}/{party}/{account}
+        # BIL: BIL/{id}/{party}/{account} or BIL/ONL/{id}/{party}/{ref}
         if desc.startswith('BIL/'):
-            m = re.search(r'BIL/[^/]+/([^/]+)', desc)
-            if m:
-                return clean(m.group(1))
+            parts = [p.strip() for p in desc.split('/') if p.strip()]
+            for candidate in parts[1:]:
+                cleaned = clean(candidate)
+                if (
+                    cleaned
+                    and not re.fullmatch(r"\d{6,}|ONL|BIL", cleaned, re.IGNORECASE)
+                    and not self._is_bank_segment(cleaned)
+                ):
+                    return cleaned
 
         # CMS: CMS/{ref}/{party}
         if desc.startswith('CMS/'):
@@ -239,8 +254,14 @@ class ICICIDetailedParser(BaseParser):
             if m:
                 return clean(m.group(1))
 
-        # Fallback: return first 80 chars of cleaned description
-        return desc[:80].strip()
+        # NEFT-CITIN...-PARTY NAME... (ICICI NEFT format)
+        m = re.search(r'NEFT-[A-Z]{4}\d+-([A-Za-z][A-Za-z0-9 .&]+?)(?:\s*-|\s*$)', desc)
+        if m:
+            candidate = clean(m.group(1))
+            if candidate and not self._is_bank_segment(candidate):
+                return candidate
+
+        return self._extract_party_from_description(desc)
 
     def _extract_row_indexed(self, row, col_indices, date_pattern):
         date = None
@@ -254,19 +275,10 @@ class ICICIDetailedParser(BaseParser):
 
         wd_idx = col_indices.get("withdrawal")
         dp_idx = col_indices.get("deposit")
-        wd_amount = self._parse_amount_cell(self._safe_cell(row, wd_idx)) if wd_idx is not None else None
-        dp_amount = self._parse_amount_cell(self._safe_cell(row, dp_idx)) if dp_idx is not None else None
-
-        if wd_amount is not None and wd_amount != 0:
-            amount = wd_amount
-        elif dp_amount is not None and dp_amount != 0:
-            amount = dp_amount
-        elif wd_amount is not None:
-            amount = wd_amount
-        elif dp_amount is not None:
-            amount = dp_amount
-        else:
-            amount = None
+        amount = self._amount_from_debit_credit(
+            self._safe_cell(row, wd_idx) if wd_idx is not None else None,
+            self._safe_cell(row, dp_idx) if dp_idx is not None else None,
+        )
 
         desc_idx = col_indices.get("description")
         if desc_idx is not None:
@@ -281,7 +293,7 @@ class ICICIDetailedParser(BaseParser):
                 description = desc
 
         if date and amount is not None:
-            party = self._extract_party_name(description)
+            party = self._extract_party_name(description) or self._extract_party_from_description(description)
             return {
                 "date": date,
                 "amount": amount,
@@ -305,21 +317,13 @@ class ICICIDetailedParser(BaseParser):
 
             if date is None and date_pattern.search(cell_str):
                 date = cell_str
-            elif amount is None and amount_pattern.search(cell_str):
-                try:
-                    amt_str = cell_str.replace(",", "").replace("$", "").replace(" ", "")
-                    negative = amt_str.startswith('(') and amt_str.endswith(')')
-                    amt_str = amt_str.replace("(", "").replace(")", "")
-                    amount = float(amt_str)
-                    if negative:
-                        amount = -amount
-                except ValueError:
-                    pass
+            elif amount is None and amount_pattern.match(cell_str.replace(" ", "")):
+                amount = self._parse_amount_cell(cell_str)
             elif description is None and len(cell_str) > 3 and not value_date_pattern.match(cell_str):
                 description = cell_str
 
         if date and amount is not None:
-            party = self._extract_party_name(description)
+            party = self._extract_party_name(description) or self._extract_party_from_description(description)
             return {
                 "date": date,
                 "amount": amount,

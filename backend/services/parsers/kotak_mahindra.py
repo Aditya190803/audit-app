@@ -131,6 +131,24 @@ class KotakMahindraParser(BaseParser):
         elif n >= 2 and balances[0] is not None and balances[1] is not None:
             # Infer from balance change
             types[0] = "deposit" if balances[1] >= balances[0] else "withdrawal"
+        elif n == 1:
+            if len(withdrawals) == 1 and len(deposits) != 1:
+                types[0] = "withdrawal"
+            elif len(deposits) == 1 and len(withdrawals) != 1:
+                types[0] = "deposit"
+            elif len(withdrawals) >= 1:
+                types[0] = "withdrawal"
+            elif len(deposits) >= 1:
+                types[0] = "deposit"
+        # Fallback: infer from narration keywords
+        if types[0] is None and n >= 1 and narrations:
+            desc = narrations[0].upper() if narrations[0] else ""
+            debit_markers = ["UPI-DR", "/DR/", " WDL ", "WITHDRAWAL", "BY DEBIT", "DEBIT"]
+            credit_markers = ["/CR/", " DEP ", "DEPOSIT", "BY TRANSFER", "CREDIT"]
+            if any(m in desc for m in debit_markers):
+                types[0] = "withdrawal"
+            elif any(m in desc for m in credit_markers):
+                types[0] = "deposit"
 
         wd_i = 0
         dp_i = 0
@@ -152,12 +170,30 @@ class KotakMahindraParser(BaseParser):
             if not date_pattern.search(date_str):
                 continue
             narration = narrations[i] if i < len(narrations) else ""
+            if not narration:
+                narration = ""
+
+            # Clean Kotak-style dash-separated narrations: UPI-NAME-BANK-IFSC-REF-UPI
+            clean_narration = self._clean_kotak_narration(narration)
+
             transactions.append({
                 "date": date_str,
                 "amount": round(amount_for_index[i], 2),
                 "description": narration,
-                "party_name": narration,
+                "party_name": self._extract_party_from_description(clean_narration) or self._extract_party_from_description(narration) or narration,
                 "raw_text": f"{date_str} | {narration}",
             })
 
         return transactions
+
+    @classmethod
+    def _clean_kotak_narration(cls, narration: str) -> str:
+        if not narration:
+            return ""
+        m = re.match(r'^UPI-(.+)', narration, re.IGNORECASE)
+        if m:
+            rest = m.group(1)
+            parts = rest.split("-")
+            if len(parts) >= 3:
+                return "UPI/" + "/".join(parts)
+        return narration

@@ -126,26 +126,50 @@ class ICICINumberedParser(BaseParser):
                 "date": date_str,
                 "amount": amount,
                 "description": description,
-                "party_name": description,
+                "party_name": self._extract_party_from_description(description) or description,
                 "raw_text": f"{date_str} | {description}",
+                "_balance": balance,
             })
 
+        return self._apply_balance_signs(transactions)
+
+    def _apply_balance_signs(self, transactions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        prev_balance = None
+        for tx in transactions:
+            amount = tx.get("amount")
+            balance = tx.pop("_balance", None)
+            if amount is None:
+                continue
+
+            signed = None
+            if prev_balance is not None and balance is not None:
+                delta = round(balance - prev_balance, 2)
+                if abs(delta - amount) <= 0.02:
+                    signed = abs(amount)
+                elif abs(delta + amount) <= 0.02:
+                    signed = -abs(amount)
+
+            tx["amount"] = signed if signed is not None else self._infer_signed_amount(amount, tx.get("description"))
+
+            if balance is not None:
+                prev_balance = balance
         return transactions
 
     @staticmethod
     def _is_header_or_footer(line: str) -> bool:
         """Check if a line is a header/footer marker, not a transaction description."""
         cline = line.lower().strip()
-        # Short lines that are clearly headers
         if len(cline) < 5:
             return False
-        header_patterns = ["s no.", "transaction date", "cheque number",
+        header_patterns = ["s no.", "s no", "transaction date", "cheque number",
                            "withdrawal", "deposit", "balance",
-                           "dial your bank", "never share", "www.", "please call"]
+                           "dial your bank", "never share", "www.", "please call",
+                           "page ", "statement of account", "icici bank",
+                           "customer care", "toll free", "note:", "important:"]
         for kw in header_patterns:
             if cline.startswith(kw) or cline == kw:
                 return True
-        return False
+        return bool(re.match(r'^\d+\s*$', cline.strip()))
 
     @staticmethod
     def _parse_amount(text: str) -> Optional[float]:

@@ -44,7 +44,7 @@ class SBIStandardParser(BaseParser):
         value_date_pattern = re.compile(
             r"^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$|^\d{1,2}\.\d{1,2}\.\d{2,4}$|^\d{1,2}\s+[A-Za-z]{3}\s+\d{4}$"
         )
-        amount_pattern = re.compile(r"[\d,]+\.\d{2}")
+        amount_pattern = re.compile(r"^\(?-?[\d,]+\.\d{1,2}\)?$")
 
         for table in tables:
             txns = self._parse_table(table, date_pattern, amount_pattern, value_date_pattern)
@@ -90,23 +90,15 @@ class SBIStandardParser(BaseParser):
 
         dr_idx = col_indices.get("debit")
         cr_idx = col_indices.get("credit")
-        dr_amount = self._parse_amount_cell(self._safe_cell(row, dr_idx)) if dr_idx is not None else None
-        cr_amount = self._parse_amount_cell(self._safe_cell(row, cr_idx)) if cr_idx is not None else None
-
-        if dr_amount is not None and dr_amount != 0:
-            amount = dr_amount
-        elif cr_amount is not None and cr_amount != 0:
-            amount = cr_amount
-        elif dr_amount is not None:
-            amount = dr_amount
-        elif cr_amount is not None:
-            amount = cr_amount
-        else:
-            amount = None
+        amount = self._amount_from_debit_credit(
+            self._safe_cell(row, dr_idx) if dr_idx is not None else None,
+            self._safe_cell(row, cr_idx) if cr_idx is not None else None,
+        )
 
         desc_idx = col_indices.get("description")
         if desc_idx is not None:
             desc = str(self._safe_cell(row, desc_idx) or "").strip()
+            desc = " ".join(desc.replace("\n", " ").split())
             if desc:
                 description = desc
 
@@ -117,14 +109,36 @@ class SBIStandardParser(BaseParser):
                 description = desc
 
         if date and amount is not None:
+            party = self._extract_sbi_party(description)
             return {
                 "date": date,
                 "amount": amount,
                 "description": description or "",
-                "party_name": description or "",
+                "party_name": party or self._extract_party_from_description(description) or description or "",
                 "raw_text": " | ".join(str(c or "") for c in row),
             }
         return None
+
+    @classmethod
+    def _extract_sbi_party(cls, description: Optional[str]) -> str:
+        if not description:
+            return ""
+        desc = " ".join(description.replace("\n", " ").split())
+
+        # SBI prefixes: "BY TRANSFER-", "TO TRANSFER-", "by debit card-", "WDL TFR-", "DEP TFR-"
+        m = re.match(r'^(?:BY|TO)\s+TRANSFER\s*[-.]?\s*', desc, re.IGNORECASE)
+        if m:
+            desc = desc[m.end():].strip()
+
+        m = re.match(r'^by\s+debit\s+card\s*[-.]?\s*', desc, re.IGNORECASE)
+        if m:
+            desc = desc[m.end():].strip()
+
+        m = re.match(r'^(?:WDL|DEP)\s*TFR\s*', desc, re.IGNORECASE)
+        if m:
+            desc = desc[m.end():].strip()
+
+        return ""
 
     def _extract_row_naive(self, row, date_pattern, amount_pattern, value_date_pattern):
         date = None
@@ -140,25 +154,18 @@ class SBIStandardParser(BaseParser):
 
             if date is None and date_pattern.search(cell_str):
                 date = cell_str
-            elif amount is None and amount_pattern.search(cell_str):
-                try:
-                    amt = (
-                        cell_str.replace(",", "")
-                        .replace("(", "-")
-                        .replace(")", "")
-                    )
-                    amount = float(amt)
-                except ValueError:
-                    pass
+            elif amount is None and amount_pattern.match(cell_str.replace(" ", "")):
+                amount = self._parse_amount_cell(cell_str)
             elif description is None and len(cell_str) > 3 and not value_date_pattern.match(cell_str):
-                description = cell_str
+                description = " ".join(cell_str.replace("\n", " ").split())
 
         if date and amount is not None:
+            party = self._extract_sbi_party(description)
             return {
                 "date": date,
                 "amount": amount,
                 "description": description or "",
-                "party_name": description or "",
+                "party_name": party or self._extract_party_from_description(description) or description or "",
                 "raw_text": " | ".join(str(c or "") for c in row),
             }
         return None

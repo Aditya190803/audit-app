@@ -79,28 +79,55 @@ class UnionBankParser(BaseParser):
             return None
 
         remarks_cell = str(row[col_indices["remarks"]] or "").strip()
-        description = " ".join(remarks_cell.split()) if remarks_cell else ""
+        description = " ".join(remarks_cell.replace("\n", " ").split()) if remarks_cell else ""
 
-        wd_amount = self._parse_amount_cell(row[col_indices["withdrawal"]]) if "withdrawal" in col_indices else None
-        dp_amount = self._parse_amount_cell(row[col_indices["deposit"]]) if "deposit" in col_indices else None
-
-        amount = None
-        if wd_amount is not None and wd_amount != 0:
-            amount = wd_amount
-        elif dp_amount is not None and dp_amount != 0:
-            amount = dp_amount
-        elif wd_amount is not None:
-            amount = wd_amount
-        elif dp_amount is not None:
-            amount = dp_amount
+        amount = self._amount_from_debit_credit(
+            row[col_indices["withdrawal"]] if "withdrawal" in col_indices else None,
+            row[col_indices["deposit"]] if "deposit" in col_indices else None,
+        )
 
         if amount is None:
             return None
+
+        party = self._extract_union_party(description) or self._extract_party_from_description(description)
 
         return {
             "date": date,
             "amount": amount,
             "description": description,
-            "party_name": description,
+            "party_name": party or description,
             "raw_text": date_cell,
         }
+
+    @classmethod
+    def _extract_union_party(cls, description: str) -> str:
+        if not description:
+            return ""
+        desc = " ".join(description.replace("\n", " ").split())
+
+        # UPIAB/UPIAR patterns: UPIAB/id/CR/DR/NAME/BANK/handle
+        m = re.search(r'\bUPI(?:AB|AR)\s*/\s*\d+\s*/\s*(?:DR|CR)\s*/\s*([^/]+)', desc, re.IGNORECASE)
+        if m:
+            candidate = m.group(1).strip()
+            if candidate and not cls._looks_like_bank_segment(candidate):
+                return cls._clean_party_candidate(candidate)
+
+        # IMPSAB/IMPSAR patterns: IMPSAB/id/PARTY/BANK
+        m = re.search(r'\bIMPS(?:AB|AR)\s*/\s*\d+\s*/\s*([^/]+)', desc, re.IGNORECASE)
+        if m:
+            candidate = m.group(1).strip()
+            if candidate and not cls._looks_like_bank_segment(candidate):
+                return cls._clean_party_candidate(candidate)
+
+        # NEFTO-PARTY format (Union Bank NEFT)
+        m = re.search(r'\bNEFT\s*O[-/]\s*([A-Za-z][A-Za-z0-9 .&]+?)(?:\s*[/-]|\s*$)', desc, re.IGNORECASE)
+        if m:
+            candidate = m.group(1).strip()
+            if candidate and not cls._looks_like_bank_segment(candidate):
+                return cls._clean_party_candidate(candidate)
+
+        # Interest payment pattern: account:Int.Pd:...
+        if re.search(r'\bInt\.Pd\b', desc, re.IGNORECASE):
+            return "Interest Credit"
+
+        return ""

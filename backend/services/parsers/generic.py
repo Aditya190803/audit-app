@@ -38,7 +38,7 @@ class GenericParser(BaseParser):
                 r"^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$|^\d{1,2}\.\d{1,2}\.\d{2,4}$|"
                 r"^\d{1,2}\s+[A-Za-z]{3}\s+\d{4}$"
             )
-            amount_pattern = re.compile(r"[\d,]+\.\d{2}")
+            amount_pattern = re.compile(r"^\(?-?[\d,]+\.\d{1,2}\)?$")
 
             for table in tables:
                 txns = self._parse_table(table, date_pattern, amount_pattern, value_date_pattern)
@@ -90,23 +90,15 @@ class GenericParser(BaseParser):
 
         wd_idx = col_indices.get("withdrawal")
         dp_idx = col_indices.get("deposit")
-        wd_amount = self._parse_amount_cell(self._safe_cell(row, wd_idx)) if wd_idx is not None else None
-        dp_amount = self._parse_amount_cell(self._safe_cell(row, dp_idx)) if dp_idx is not None else None
-
-        if wd_amount is not None and wd_amount != 0:
-            amount = wd_amount
-        elif dp_amount is not None and dp_amount != 0:
-            amount = dp_amount
-        elif wd_amount is not None:
-            amount = wd_amount
-        elif dp_amount is not None:
-            amount = dp_amount
-        else:
-            amount = None
+        amount = self._amount_from_debit_credit(
+            self._safe_cell(row, wd_idx) if wd_idx is not None else None,
+            self._safe_cell(row, dp_idx) if dp_idx is not None else None,
+        )
 
         desc_idx = col_indices.get("description")
         if desc_idx is not None:
             desc = str(self._safe_cell(row, desc_idx) or "").strip()
+            desc = " ".join(desc.replace("\n", " ").split())
             if desc:
                 description = desc
 
@@ -121,7 +113,7 @@ class GenericParser(BaseParser):
                 "date": date,
                 "amount": amount,
                 "description": description or "",
-                "party_name": description or "",
+                "party_name": self._extract_party_from_description(description) or description or "",
                 "raw_text": " | ".join(str(c or "") for c in row),
             }
         return None
@@ -130,6 +122,10 @@ class GenericParser(BaseParser):
         date = None
         amount = None
         description = None
+        full_date_pattern = re.compile(
+            r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2}|"
+            r"\d{1,2}\.\d{1,2}\.\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{4}"
+        )
 
         for cell in row:
             if not cell:
@@ -138,32 +134,24 @@ class GenericParser(BaseParser):
             if not cell_str:
                 continue
 
+            cleaned_amount = cell_str.replace(" ", "")
+            is_likely_date = bool(full_date_pattern.search(cleaned_amount)) and (
+                "-" in cleaned_amount or "/" in cleaned_amount or cleaned_amount.count(".") >= 2
+            )
+
             if date is None and date_pattern.search(cell_str):
                 date = cell_str
-            elif amount is None and amount_pattern.search(cell_str):
-                # Skip if it looks like a date (multiple dots/slashes)
-                dot_count = cell_str.count('.')
-                slash_count = cell_str.count('/')
-                if dot_count > 1 or slash_count > 0:
-                    continue
-                try:
-                    amt_str = cell_str.replace(",", "").replace("$", "").replace(" ", "")
-                    negative = amt_str.startswith('(') and amt_str.endswith(')')
-                    amt_str = amt_str.replace("(", "").replace(")", "")
-                    amount = float(amt_str)
-                    if negative:
-                        amount = -amount
-                except ValueError:
-                    pass
+            elif amount is None and amount_pattern.match(cleaned_amount) and not is_likely_date:
+                amount = self._parse_amount_cell(cell_str)
             elif description is None and len(cell_str) > 3 and not value_date_pattern.match(cell_str):
-                description = cell_str
+                description = " ".join(cell_str.replace("\n", " ").split())
 
         if date and amount is not None:
             return {
                 "date": date,
                 "amount": amount,
                 "description": description or "",
-                "party_name": description or "",
+                "party_name": self._extract_party_from_description(description) or description or "",
                 "raw_text": " | ".join(str(c or "") for c in row),
             }
         return None
@@ -173,7 +161,7 @@ class GenericParser(BaseParser):
         date_pattern = re.compile(
             r"(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}\.\d{1,2}\.\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{4})\s+"
         )
-        amount_pattern = re.compile(r"\s+([\d,]+\.\d{2})$")
+        amount_pattern = re.compile(r"\s+(\(?-?[\d,]+\.\d{1,2}\)?)$")
         value_date_pattern = re.compile(
             r"^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$|^\d{1,2}\.\d{1,2}\.\d{2,4}$|^\d{1,2}\s+[A-Za-z]{3}\s+\d{4}$"
         )
@@ -194,8 +182,12 @@ class GenericParser(BaseParser):
                 if not amount_match:
                     continue
 
-                amount_str = amount_match.group(1).replace(",", "")
+                amount_str = amount_match.group(1)
                 desc = rest[: amount_match.start()].strip()
+
+                # Clean common bank prefixes
+                desc = re.sub(r'^(?:WDL|DEP)\s*TFR\s*', '', desc, flags=re.IGNORECASE).strip()
+                desc = re.sub(r'^(?:BY|TO)\s+TRANSFER\s*[-.]?\s*', '', desc, flags=re.IGNORECASE).strip()
 
                 if value_date_pattern.match(desc):
                     desc = ""
@@ -203,12 +195,15 @@ class GenericParser(BaseParser):
                 desc = " ".join(desc.split())
 
                 try:
-                    amount = float(amount_str)
+                    amount = self._parse_amount_cell(amount_str)
+                    if amount is None:
+                        continue
+                    amount = self._infer_signed_amount(amount, desc)
                     transactions.append({
                         "date": date_str,
                         "amount": amount,
                         "description": desc if desc else date_str,
-                        "party_name": desc if desc else date_str,
+                        "party_name": self._extract_party_from_description(desc) or (desc if desc else date_str),
                         "raw_text": line,
                         "page_number": page["page_number"],
                     })
@@ -222,7 +217,7 @@ class GenericParser(BaseParser):
         date_pattern = re.compile(
             r"(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}\.\d{1,2}\.\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{4})"
         )
-        amount_pattern = re.compile(r"([\d,]+\.\d{2})$")
+        amount_pattern = re.compile(r"(\(?-?[\d,]+\.\d{1,2}\)?)$")
         value_date_pattern = re.compile(
             r"^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$|^\d{1,2}\.\d{1,2}\.\d{2,4}$|^\d{1,2}\s+[A-Za-z]{3}\s+\d{4}$"
         )
@@ -243,19 +238,26 @@ class GenericParser(BaseParser):
                 if not amount_match:
                     continue
 
-                amount_str = amount_match.group(1).replace(",", "")
+                amount_str = amount_match.group(1)
                 desc = rest[: amount_match.start()].strip()
+
+                # Clean common bank prefixes
+                desc = re.sub(r'^(?:WDL|DEP)\s*TFR\s*', '', desc, flags=re.IGNORECASE).strip()
+                desc = re.sub(r'^(?:BY|TO)\s+TRANSFER\s*[-.]?\s*', '', desc, flags=re.IGNORECASE).strip()
 
                 if value_date_pattern.match(desc):
                     desc = ""
 
                 try:
-                    amount = float(amount_str)
+                    amount = self._parse_amount_cell(amount_str)
+                    if amount is None:
+                        continue
+                    amount = self._infer_signed_amount(amount, desc)
                     transactions.append({
                         "date": date_str,
                         "amount": amount,
                         "description": desc,
-                        "party_name": desc,
+                        "party_name": self._extract_party_from_description(desc) or desc,
                         "raw_text": line,
                         "page_number": page["page_number"],
                     })
