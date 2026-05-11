@@ -54,23 +54,38 @@ function formatSuspiciousReason(reason: string | null): string {
   return parts.join(' | ')
 }
 
+function confidenceText(tag: Tag): string {
+  return `${Math.round(tag.confidence * 100)}%`
+}
+
+export function formatTagReason(tag: Tag): string {
+  const matchedName = extractMatchedName(tag.reason)
+  const phoneText = formatPhoneMatch(tag.reason)
+
+  if (tag.tag_type === 'client') {
+    if (phoneText && matchedName) return `matched with client phone ${phoneText.replace('phone: ', '')} (${matchedName})`
+    if (matchedName) return `matched with ${matchedName} (${confidenceText(tag)})`
+    return tag.reason || 'matched with client'
+  }
+
+  if (tag.tag_type === 'broker') {
+    if (matchedName) return `matched with ${matchedName} (${confidenceText(tag)})`
+    return tag.reason || 'matched with broker'
+  }
+
+  if (tag.tag_type === 'suspicious') {
+    return formatSuspiciousReason(tag.reason)
+  }
+
+  return tag.reason || tag.tag_type
+}
+
 export const TagBadge: React.FC<TagBadgeProps> = ({ tag, onRemove, showConfidence = true }) => {
   const cls = tagClasses[tag.tag_type] || tagClasses.client
-  const matchedName = extractMatchedName(tag.reason)
-  const suspiciousText = tag.tag_type === 'suspicious' ? formatSuspiciousReason(tag.reason) : null
-  const phoneText = tag.tag_type === 'client' ? formatPhoneMatch(tag.reason) : null
 
   return (
     <span className={cls} title={tag.reason || tag.tag_type}>
-      {tag.tag_type === 'suspicious' && suspiciousText ? (
-        <span>{suspiciousText}</span>
-      ) : phoneText ? (
-        <span>{phoneText}</span>
-      ) : matchedName ? (
-        <span>{matchedName}</span>
-      ) : (
-        <span className="capitalize">{tag.tag_type}</span>
-      )}
+      <span className="capitalize">{tag.tag_type}</span>
       {showConfidence && tag.confidence < 1.0 && (
         <span className="ml-1 opacity-70">
           {Math.round(tag.confidence * 100)}%
@@ -100,6 +115,6 @@ export const TagBadgeList: React.FC<{
   )
   const tag = tags[0]
   return (
-    <TagBadge tag={tag} onRemove={onRemoveTag} />
+    <TagBadge tag={tag} onRemove={onRemoveTag} showConfidence={false} />
   )
 }

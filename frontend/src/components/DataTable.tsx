@@ -11,7 +11,7 @@ import {
 } from '@tanstack/react-table'
 import { ArrowUpDown, ArrowUp, ArrowDown, CheckSquare, Square, Columns, ChevronDown, Check } from 'lucide-react'
 import type { Transaction } from '../types/api'
-import { TagBadgeList } from './TagBadge'
+import { formatTagReason, TagBadgeList } from './TagBadge'
 
 interface DataTableProps {
   transactions: Transaction[]
@@ -44,6 +44,7 @@ const ALL_COLUMNS = [
   { id: 'description', label: 'Description' },
   { id: 'amount', label: 'Amount' },
   { id: 'tags', label: 'Tag' },
+  { id: 'reason', label: 'Reason' },
   { id: 'page_number', label: 'Page' },
 ]
 
@@ -131,17 +132,14 @@ export const DataTable: React.FC<DataTableProps> = ({
       cell: (info) => {
         const tx = info.row.original
         return (
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-[var(--text-primary)] truncate">
-              {tx.party_name || tx.description || '-'}
+          <div className="min-w-[360px] max-w-[680px] whitespace-normal break-words">
+            <p className="text-sm text-[var(--text-primary)] leading-5 whitespace-normal break-words">
+              {tx.description || tx.raw_text || tx.party_name || '-'}
             </p>
-            {tx.description && tx.party_name && tx.description !== tx.party_name && (
-              <p className="text-xs text-[var(--text-tertiary)] truncate">{tx.description}</p>
-            )}
           </div>
         )
       },
-      size: 320
+      size: 420
     },
     {
       id: 'amount',
@@ -191,6 +189,23 @@ export const DataTable: React.FC<DataTableProps> = ({
         )
       },
       size: 160
+    },
+    {
+      id: 'reason',
+      accessorFn: (row) => row.tags?.[0]?.reason || '',
+      header: () => <span className="text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider">Reason</span>,
+      cell: (info) => {
+        const tag = info.row.original.tags?.[0]
+        if (!tag) {
+          return <span className="text-xs text-[var(--text-tertiary)]">-</span>
+        }
+        return (
+          <p className="max-w-[280px] text-xs leading-5 text-[var(--text-secondary)] whitespace-normal break-words">
+            {formatTagReason(tag)}
+          </p>
+        )
+      },
+      size: 280
     },
     {
       id: 'page_number',
