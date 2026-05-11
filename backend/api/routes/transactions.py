@@ -61,14 +61,17 @@ async def parse_files(
         try:
             excluded = json.loads(excluded_brokers)
             if excluded:
+                excluded_set = set(e.strip().lower() for e in excluded)
                 def _get_broker_name(client: dict) -> str:
                     raw = client.get('raw_data', {})
+                    if not isinstance(raw, dict):
+                        return ''
                     for key, val in raw.items():
                         k = str(key).lower().strip()
-                        if k in ('broker', 'broker_name', 'brokername', 'source'):
+                        if k in ('broker', 'broker_name', 'brokername', 'source', 'dp name', 'dpname', 'depository participant'):
                             return str(val).strip()
                     return ''
-                clients = [c for c in clients if _get_broker_name(c) not in excluded]
+                clients = [c for c in clients if _get_broker_name(c).lower() not in excluded_set]
         except Exception:
             pass
 

@@ -35,19 +35,24 @@ def update_broker(broker_id: int, data: BrokerCreate, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="Broker not found")
     
     old_name = broker.name
+    old_aliases = broker.aliases or []
     broker.name = data.name
     broker.aliases = data.aliases
     broker.is_active = data.is_active
     db.commit()
     db.refresh(broker)
     
-    # Update config broker list
+    # Update config broker list: remove old name and aliases, add new name
     config = ConfigService(db)
     brokers = config.get_brokers()
-    if old_name in brokers:
-        brokers.remove(old_name)
-    if data.name not in brokers:
-        brokers.append(data.name)
+    names_to_remove = {old_name} | set(old_aliases)
+    for name in names_to_remove:
+        if name in brokers:
+            brokers.remove(name)
+    names_to_add = {data.name} | set(data.aliases or [])
+    for name in names_to_add:
+        if name not in brokers:
+            brokers.append(name)
     config.set_brokers(sorted(brokers))
     
     return broker
@@ -59,14 +64,17 @@ def delete_broker(broker_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Broker not found")
     
     name = broker.name
+    aliases = broker.aliases or []
     db.delete(broker)
     db.commit()
     
-    # Remove from config broker list
+    # Remove broker name and all aliases from config broker list
     config = ConfigService(db)
     brokers = config.get_brokers()
-    if name in brokers:
-        brokers.remove(name)
-        config.set_brokers(brokers)
+    names_to_remove = {name} | set(aliases)
+    for n in names_to_remove:
+        if n in brokers:
+            brokers.remove(n)
+    config.set_brokers(brokers)
     
     return {"message": "Broker deleted"}

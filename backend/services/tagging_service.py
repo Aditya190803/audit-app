@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from backend.models import Transaction, Tag, Broker, Alias, AuditSession
 from backend.services.fuzzy_service import FuzzyService
 from backend.services.config_service import ConfigService
+from backend.services.parsers.base import BaseParser
 from typing import List, Dict, Any, Optional
 from collections import defaultdict
 import re
@@ -45,7 +46,11 @@ class TaggingService:
     def _extract_phone_candidates(text: str) -> List[str]:
         if not text:
             return []
-        candidates = re.findall(r'\b\d{10,15}\b', re.sub(r'\D', ' ', text))
+        # Strip out obvious non-phone patterns before extracting digits
+        cleaned = re.sub(r'(?:UPI|IMPS|NEFT|RTGS|MMT|UPIAB|UPIAR)\s*/\s*\d+', ' ', text, flags=re.IGNORECASE)
+        cleaned = re.sub(r'[A-Za-z]\d{6,}', ' ', cleaned)
+        cleaned = re.sub(r'\d{12,}', ' ', cleaned)
+        candidates = re.findall(r'\b\d{10,15}\b', re.sub(r'\D', ' ', cleaned))
         result = set()
         for c in candidates:
             normalized = TaggingService._normalize_phone(c)
@@ -120,8 +125,12 @@ class TaggingService:
         # Load brokers and aliases
         brokers = self.db.query(Broker).filter(Broker.is_active == True).all()
         broker_names = [b.name for b in brokers]
+        # Map aliases back to canonical broker name for deduplication
+        alias_to_canonical = {}
         for b in brokers:
-            broker_names.extend(b.aliases or [])
+            for alias in (b.aliases or []):
+                broker_names.append(alias)
+                alias_to_canonical[alias] = b.name
         
         aliases = self.db.query(Alias).all()
         alias_list = [{"alias_name": a.alias_name, "canonical_name": a.canonical_name} for a in aliases]
@@ -154,9 +163,11 @@ class TaggingService:
             full_text = f"{party_text} {desc_text}"
             
             # Extract clean party name from description for better matching
-            match_text = self._extract_party_name(full_text) or full_text
+            extracted_party = self._extract_party_name(full_text) or BaseParser._extract_party_from_description(desc_text)
+            match_text = extracted_party or party_text or desc_text
             
             # --- Priority: client > broker > suspicious ---
+            # Only one tag type per transaction to avoid conflicting tags
             tagged = False
             
             # 1. Phone number exact match (most reliable)
@@ -168,7 +179,7 @@ class TaggingService:
                             transaction_id=tx.id,
                             tag_type="client",
                             confidence=1.0,
-                            reason=f"Phone match: {phone} -> {client_name}",
+                            reason=f"Phone match: {phone} -> '{client_name}'",
                             source="auto",
                             is_manual=False
                         )
@@ -181,7 +192,8 @@ class TaggingService:
             
             if not tagged:
                 # 2. Fuzzy client name matching (using extracted name)
-                client_matches = self.fuzzy.match_client_names(match_text, clients, alias_list)
+                client_match_text = f"{match_text} {desc_text}".strip()
+                client_matches = self.fuzzy.match_client_names(client_match_text, clients, alias_list)
                 for match in client_matches:
                     if match["score"] >= self.config.get_fuzzy_threshold():
                         tag = Tag(
@@ -198,16 +210,38 @@ class TaggingService:
                         break
             
             if not tagged:
-                # 3. Broker matching (only for names not tagged as client, using full text to avoid false matches on short extracted names)
+                # 3. Broker matching. Use the extracted counterparty, not the full
+                # narration, so intermediary bank names don't become broker hits.
+                # Skip broker matching if the party matches any client name (avoid
+                # tagging a client's own transaction as a broker hit).
                 common_words = self.config.get("broker_common_words") or []
-                broker_matches = self.fuzzy.match_broker_names(full_text, broker_names, exclusions, common_words)
-                for match in broker_matches:
-                    if match["score"] >= self.config.get_fuzzy_threshold():
+                broker_text = extracted_party or party_text
+                
+                # Check if the party text itself matches a client - if so, skip broker check
+                is_client_related = False
+                if broker_text:
+                    for c in clients:
+                        if self.fuzzy.normalize_text(broker_text) == self.fuzzy.normalize_text(c["name"]):
+                            is_client_related = True
+                            break
+                
+                if not is_client_related:
+                    broker_matches = self.fuzzy.match_broker_names(broker_text, broker_names, exclusions, common_words)
+                    # Deduplicate: keep only the best-scoring match per canonical broker name
+                    seen_brokers = set()
+                    for match in broker_matches:
+                        if match["score"] < self.config.get_fuzzy_threshold():
+                            continue
+                        orig = match["original"]
+                        canonical = alias_to_canonical.get(orig, orig)
+                        if canonical in seen_brokers:
+                            continue
+                        seen_brokers.add(canonical)
                         tag = Tag(
                             transaction_id=tx.id,
                             tag_type="broker",
                             confidence=match["score"],
-                            reason=f"Broker match: '{match['original']}' (score: {match['score']})",
+                            reason=f"Broker match: '{orig}' (score: {match['score']})",
                             source="auto",
                             is_manual=False
                         )
@@ -275,7 +309,7 @@ class TaggingService:
         
         for tx in transactions:
             if tx.amount and tx.party_name:
-                # Keep sign so credits and debits are grouped separately
+                # Key by rounded amount AND sign so credits and debits are separate
                 key = (round(tx.amount, 2), self.fuzzy.normalize_text(tx.party_name))
                 groups[key].append(tx)
         
@@ -297,10 +331,10 @@ class TaggingService:
                        reason: str = "", confidence: float = 1.0,
                        source: str = "manual", is_manual: bool = True,
                        commit: bool = True) -> Tag:
-        """Add a manual tag to a transaction. Removes all existing auto-tags first (single-tag model)."""
+        """Add a manual tag to a transaction. Removes all existing tags first (single-tag model)."""
+        # Remove ALL existing tags (both auto and manual) to prevent duplicates
         self.db.query(Tag).filter(
-            Tag.transaction_id == transaction_id,
-            Tag.is_manual == False
+            Tag.transaction_id == transaction_id
         ).delete(synchronize_session=False)
         
         tag = Tag(

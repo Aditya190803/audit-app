@@ -39,22 +39,16 @@ DEFAULT_CONFIGS = {
         "global", "international", "payments", "money"
     ],
     "suspicious_keywords": [
-        "loan", "personal loan", "borrow", "lend", "advance",
-        "temp", "temporary", "friend", "family", "relative",
-        "escrow", "collection", "dummy", "pool", "pooling",
+        "personal loan", "borrow", "lend", "unauthorized advance",
+        "escrow", "dummy", "pooling",
         "dabba", "incentive",
-        "tips", "referral", "rebate", "service charge",
-        "payin", "payout",
-        "demat",
         "guaranteed return", "fixed return",
-        "doubler", "multibagger", "premium",
-        "signal", "calls",
-        "client payment", "client fund", "third party",
-        "3rd party", "adjustment", "reversal", "parking",
-        "rotation", "accommodation", "pass through",
-        "surrogate", "proxy", "beneficiary", "set off",
-        "collect", "received for", "paid for", "on behalf",
-        "cash deposit", "cash withdrawal", "cash"
+        "doubler", "multibagger",
+        "client payment", "3rd party transfer", "pass through",
+        "surrogate", "proxy", "accommodation entry",
+        "round tripping", "layering", "hawala",
+        "cash deposit large", "cash withdrawal large",
+        "structuring", "smurfing",
     ],
     "default_bank_profile": "generic"
 }
