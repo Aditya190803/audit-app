@@ -67,8 +67,13 @@ class PDFService:
         return tables
     
     def parse_transactions(self, pdf_path: str, password: Optional[str] = None, 
-                          bank_name: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Parse transactions from PDF using the parser registry."""
+                           bank_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Parse transactions from PDF using the parser registry.
+        
+        Strategy: if bank_name is specified, use that parser. Otherwise detect
+        the best parser. If the best parser returns no transactions, try the
+        next-highest-scoring parser before falling back to generic.
+        """
         from backend.services.parsers import registry
         tables = self.extract_tables(pdf_path, password)
         pages = self.extract_text(pdf_path, password)
@@ -78,7 +83,35 @@ class PDFService:
             parser = registry.get_by_name(bank_name)
 
         if not parser:
-            parser = registry.detect(tables, pages)
+            # Try all parsers sorted by detection score, best first
+            scored = []
+            for p in registry.parsers:
+                if p.name == "generic":
+                    continue  # skip generic in scoring round
+                score = p.detect(tables, pages)
+                if score > 0.3:
+                    scored.append((p, score))
+            scored.sort(key=lambda x: x[1], reverse=True)
+
+            for p, score in scored:
+                try:
+                    transactions = p.parse(tables, pages)
+                    if transactions:
+                        return transactions
+                except Exception as e:
+                    print(f"[PDFService] Parser {p.name} failed: {e}")
+                    continue
+
+            # All specialized parsers failed or returned nothing - try generic
+            generic = registry.get_by_name("generic")
+            try:
+                transactions = generic.parse(tables, pages)
+                if transactions:
+                    return transactions
+            except Exception as e:
+                print(f"[PDFService] Generic parser also failed: {e}")
+
+            return []
 
         try:
             transactions = parser.parse(tables, pages)
@@ -88,7 +121,7 @@ class PDFService:
                 generic = registry.get_by_name("generic")
                 transactions = generic.parse(tables, pages)
         except Exception as e:
-            print(f"[PDFService] Parser failed: {e}")
+            print(f"[PDFService] Parser {parser.name} failed: {e}")
             generic = registry.get_by_name("generic")
             try:
                 transactions = generic.parse(tables, pages)
