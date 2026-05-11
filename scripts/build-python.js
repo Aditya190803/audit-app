@@ -3,6 +3,9 @@ const fs = require('fs')
 const path = require('path')
 
 const RESOURCES_DIR = path.join(__dirname, '..', 'resources', 'python-dist')
+const PYTHON_BIN = process.platform === 'win32'
+  ? path.join(__dirname, '..', '.venv', 'Scripts', 'python.exe')
+  : path.join(__dirname, '..', '.venv', 'bin', 'python')
 
 function main() {
   console.log('[Build] Starting Python backend build...')
@@ -15,7 +18,9 @@ function main() {
 
   // PyInstaller command
   const pyinstallerCmd = [
-    'pyinstaller',
+    PYTHON_BIN,
+    '-m',
+    'PyInstaller',
     '--onedir',
     '--noconfirm',
     '--clean',
