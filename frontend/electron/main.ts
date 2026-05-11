@@ -6,11 +6,12 @@ import getPort from 'get-port'
 import fs from 'node:fs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const APP_ROOT = findProjectRoot(__dirname)
 
 let pythonProcess: ReturnType<typeof spawn> | null = null
 let backendPort: number = 0
 
-process.env.APP_ROOT = findProjectRoot(__dirname)
+process.env.APP_ROOT = APP_ROOT
 
 function findProjectRoot(startDir: string): string {
   let dir = startDir
@@ -24,8 +25,8 @@ function findProjectRoot(startDir: string): string {
 }
 
 export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
-export const MAIN_DIST = path.join(process.env.APP_ROOT, 'out')
-export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'out', 'renderer')
+export const MAIN_DIST = path.join(APP_ROOT, 'out')
+export const RENDERER_DIST = path.join(APP_ROOT, 'out', 'renderer')
 
 function resolveBackendPath(): { command: string; args: string[]; cwd: string } {
   if (app.isPackaged) {
@@ -33,12 +34,12 @@ function resolveBackendPath(): { command: string; args: string[]; cwd: string } 
     return { command: exePath, args: [], cwd: path.dirname(exePath) }
   } else {
     const pythonPath = process.platform === 'win32'
-      ? path.join(process.env.APP_ROOT, 'backend', 'venv', 'Scripts', 'python.exe')
-      : path.join(process.env.APP_ROOT, 'backend', 'venv', 'bin', 'python')
+      ? path.join(APP_ROOT, 'backend', 'venv', 'Scripts', 'python.exe')
+      : path.join(APP_ROOT, 'backend', 'venv', 'bin', 'python')
     return {
       command: pythonPath,
       args: ['-m', 'uvicorn', 'backend.main:app', '--host', '127.0.0.1'],
-      cwd: process.env.APP_ROOT
+      cwd: APP_ROOT
     }
   }
 }
@@ -53,7 +54,7 @@ async function startPythonBackend(port: number): Promise<void> {
     const env = {
       ...process.env,
       BACKEND_PORT: String(port),
-      PYTHONPATH: process.env.APP_ROOT,
+      PYTHONPATH: APP_ROOT,
       TESSDATA_PREFIX: app.isPackaged
         ? path.join(process.resourcesPath, 'tesseract', 'tessdata')
         : undefined
@@ -148,7 +149,7 @@ async function createWindow(): Promise<void> {
 ipcMain.handle('get-backend-port', () => backendPort)
 
 ipcMain.handle('read-example-files', async () => {
-  const exampleDir = path.join(process.env.APP_ROOT, 'example')
+  const exampleDir = path.join(APP_ROOT, 'example')
   const result: { folders: Record<string, string[]>; clientList: string | null } = { folders: {}, clientList: null }
 
   function scanDir(dir: string, parentKey: string) {
