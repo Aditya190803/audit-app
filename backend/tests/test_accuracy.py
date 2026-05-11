@@ -15,7 +15,6 @@ from backend.services.parsers.idfc_bank import IDFCBankParser
 from backend.services.parsers.union_bank import UnionBankParser
 from backend.services.parsers.sbi_standard import SBIStandardParser
 from backend.services.parsers.sbi_compact import SBICompactParser
-from backend.services.parsers.union_bank import UnionBankParser
 from backend.services.parsers import registry
 from brokers_list import BROKERS
 
