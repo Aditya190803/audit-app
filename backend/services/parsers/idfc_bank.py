@@ -54,7 +54,7 @@ class IDFCBankParser(BaseParser):
                 continue
 
             header_idx = None
-            col_indices = None
+            new_indices = None
             data_rows = []
 
             for i, row in enumerate(data):
@@ -63,23 +63,29 @@ class IDFCBankParser(BaseParser):
                     continue
 
                 match_count = sum(1 for p in self.HEADER_PATTERNS if re.search(p, row_text))
-                if match_count >= 4 and header_idx is None:
-                    new_indices = self._detect_column_indices(row, self.COLUMN_KEYWORDS)
+                if match_count >= 4:
+                    candidate = self._detect_column_indices(row, self.COLUMN_KEYWORDS)
                     required = ["date", "description", "debit", "credit", "balance"]
-                    if all(k in new_indices for k in required):
+                    if all(k in candidate for k in required):
                         header_idx = i
-                        col_indices = new_indices
+                        new_indices = candidate
                         continue
 
-                if header_idx is not None and col_indices is not None:
+                if header_idx is not None:
                     data_rows.append(row)
 
-            if not data_rows or col_indices is None:
+            if new_indices is not None:
+                col_indices = new_indices
+
+            if col_indices is None:
+                continue
+
+            if not data_rows:
                 for i, row in enumerate(data):
                     row_text = " ".join(str(c or "") for c in row).lower()
                     if self.SUMMARY_PATTERN.search(row_text):
                         continue
-                    if i > 0 and header_idx is None:
+                    if i > 0:
                         data_rows.append(row)
 
             for row in data_rows:

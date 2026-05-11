@@ -80,6 +80,13 @@ class SBICompactParser(BaseParser):
 
         party = self._extract_party_from_description(clean_desc) or self._extract_party_from_description(description)
 
+        # Strip common noise suffixes from SBI statements: "AT <number> <branch>", branch names
+        party = re.sub(r'\s+AT\s+\d+\s+\S+.*$', '', party, flags=re.IGNORECASE).strip()
+        party = re.sub(r'\s+AT\s+\d+.*$', '', party, flags=re.IGNORECASE).strip()
+        # Strip "DEP TFR" / "WDL TFR" / "BY TRANSFER" / "TO TRANSFER" from party names
+        party = re.sub(r'^(?:DEP|WDL)\s*TFR\s+', '', party, flags=re.IGNORECASE).strip()
+        party = re.sub(r'^(?:BY|TO)\s+TRANSFER\s*[-.]?\s*', '', party, flags=re.IGNORECASE).strip()
+
         return {
             "date": date,
             "amount": amount,

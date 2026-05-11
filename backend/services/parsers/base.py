@@ -99,7 +99,7 @@ class BaseParser(ABC):
             r"CRED|PAYTM|RUPAY)\b",
             text,
 re.IGNORECASE,
-        ))
+))
 
     @classmethod
     def _clean_party_candidate(cls, text: Optional[str]) -> str:
@@ -107,13 +107,20 @@ re.IGNORECASE,
         if not text:
             return ""
 
-        text = re.sub(r"\b([A-Za-z]{3,})\s+([a-z])\b", r"\1\2", text)
-        text = re.sub(r"\b(?:A/C|AC\d*|DSCNB|PROPRIETARY|LIMITED|LTD|PVT|PRIVATE)\b\.?", " ", text, flags=re.IGNORECASE)
-        text = re.sub(r"\b(?:chg|gst)\s*rs\.?\s*\d+(?:\.\d+)?", " ", text, flags=re.IGNORECASE)
-        text = re.sub(r"\b(?:NSE\s*CLI|NSE\s*CM|BSE\s*CLI)\b", " ", text, flags=re.IGNORECASE)
-        text = re.sub(r"\b\d{6,}\b", " ", text)
-        text = re.sub(r"\b[A-Z]{4}0\d{6,}\b", " ", text)
-        text = re.sub(r"\s+", " ", text).strip(" -/")
+        # Split concatenated words: "SMCGLOBAL" -> "SMC GLOBAL" (lowercase boundary before uppercase)
+        text = re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', text)
+        # Re-join single-letter fragments that were wrongly split: "a ngel" -> "angel"
+        text = re.sub(r'\b([A-Za-z]{3,})\s+([a-z])\b', r'\1\2', text)
+        # Strip common corporate/bank suffixes
+        text = re.sub(r'\b(?:A/C|AC\d*|DSCNB|PROPRIETARY|LIMITED|LTD|PVT|PRIVATE)\b\.?', ' ', text, flags=re.IGNORECASE)
+        text = re.sub(r'\b(?:chg|gst)\s*rs\.?\s*\d+(?:\.\d+)?', ' ', text, flags=re.IGNORECASE)
+        text = re.sub(r'\b(?:NSE\s*CLI|NSE\s*CM|BSE\s*CLI|MF\s*BKG)\b', ' ', text, flags=re.IGNORECASE)
+        text = re.sub(r'\b(?:ELECT|BKG)\b', ' ', text, flags=re.IGNORECASE)
+        # Strip long numeric sequences (account/reference numbers)
+        text = re.sub(r'\b\d{6,}\b', ' ', text)
+        # Strip IFSC-like codes (4 letters + 0 + digits)
+        text = re.sub(r'\b[A-Z]{4}0\d{6,}\b', ' ', text)
+        text = re.sub(r'\s+', ' ', text).strip(' -/')
         return text[:80].strip()
 
     @classmethod

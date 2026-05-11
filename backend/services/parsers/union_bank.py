@@ -126,8 +126,8 @@ class UnionBankParser(BaseParser):
             if candidate and not cls._looks_like_bank_segment(candidate):
                 return cls._clean_party_candidate(candidate)
 
-        # Interest payment pattern: account:Int.Pd:...
-        if re.search(r'\bInt\.Pd\b', desc, re.IGNORECASE):
+        # Interest payment pattern: account:Int.Pd:... or :Int.Pd:...
+        if re.search(r'\bInt\.?\s*Pd\b', desc, re.IGNORECASE) or re.search(r'[:\.]Int\.?\s*Pd', desc, re.IGNORECASE):
             return "Interest Credit"
 
         return ""

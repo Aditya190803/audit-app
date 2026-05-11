@@ -229,6 +229,10 @@ class ICICIDetailedParser(BaseParser):
                     and not self._is_bank_segment(cleaned)
                 ):
                     return cleaned
+            # Special: BIL/ONL/... with ICICI BANK CREDIT = credit card payment
+            m = re.search(r'ICICI\s*BANK\s*CREDIT', desc, re.IGNORECASE)
+            if m:
+                return "ICICI Bank Credit"
 
         # CMS: CMS/{ref}/{party}
         if desc.startswith('CMS/'):
@@ -248,17 +252,23 @@ class ICICIDetailedParser(BaseParser):
             if m:
                 return clean(m.group(1))
 
-        # MMT/IMPS: MMT/IMPS/{txn_id}/{party}/{ifsc}
+# MMT/IMPS: MMT/IMPS/{txn_id}/{party}/{ifsc}
         if desc.startswith('MMT/IMPS/'):
             m = re.search(r'MMT/IMPS/[^/]+/([^/]+)', desc)
             if m:
                 return clean(m.group(1))
+
+        # Interest payment: Int.Pd or SB:...Int.Pd
+        if re.search(r'\bInt\.?\s*Pd\b', desc, re.IGNORECASE):
+            return "Interest Credit"
 
         # NEFT-CITIN...-PARTY NAME... (ICICI NEFT format)
         m = re.search(r'NEFT-[A-Z]{4}\d+-([A-Za-z][A-Za-z0-9 .&]+?)(?:\s*-|\s*$)', desc)
         if m:
             candidate = clean(m.group(1))
             if candidate and not self._is_bank_segment(candidate):
+                # Clean concatenated company names: SMCGLOBAL → SMC GLOBAL
+                candidate = re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', candidate)
                 return candidate
 
         return self._extract_party_from_description(desc)
