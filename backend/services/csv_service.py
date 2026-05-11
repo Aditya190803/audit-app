@@ -30,7 +30,14 @@ class CSVService:
                 name_col = None
                 for col in df.columns:
                     col_lower = str(col).lower().strip()
-                    if any(keyword in col_lower for keyword in ['name', 'client', 'customer', 'party', 'account']):
+                    if col_lower in {'name', 'client name', 'customer name', 'party name'}:
+                        name_col = col
+                        break
+                for col in df.columns:
+                    if name_col is not None:
+                        break
+                    col_lower = str(col).lower().strip()
+                    if any(keyword in col_lower for keyword in ['name', 'customer', 'party', 'account']):
                         name_col = col
                         break
                 
