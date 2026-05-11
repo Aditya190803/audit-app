@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { deleteSession as deleteSessionApi, getSessions, getTagSummary, getTransactions, parseFiles } from '../lib/api'
 import type { Transaction, AuditSession, TagSummary } from '../types/api'
 
 interface SessionState {
@@ -43,7 +44,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   loadSessions: async () => {
     set({ isLoading: true })
     try {
-      const { getSessions } = await import('../lib/api')
       const res = await getSessions()
       set({ sessions: res.data, isLoading: false })
     } catch (e) {
@@ -54,7 +54,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   loadTransactions: async (sessionId) => {
     set({ isLoading: true })
     try {
-      const { getTransactions } = await import('../lib/api')
       const res = await getTransactions(sessionId)
       set({ transactions: res.data, isLoading: false })
     } catch (e) {
@@ -64,7 +63,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   loadTagSummary: async (sessionId) => {
     try {
-      const { getTagSummary } = await import('../lib/api')
       const res = await getTagSummary(sessionId)
       set({ tagSummary: res.data })
     } catch (e) {
@@ -81,7 +79,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   processFiles: async (pdfFiles, clientList, threshold, options) => {
     set({ isProcessing: true })
     try {
-      const { parseFiles } = await import('../lib/api')
       const pdfArr = Array.isArray(pdfFiles) ? pdfFiles : [pdfFiles]
       const res = await parseFiles(pdfArr, clientList, threshold, options)
       const sessionId = res.data.session_id
@@ -100,8 +97,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
   deleteSession: async (sessionId) => {
-    const { deleteSession } = await import('../lib/api')
-    await deleteSession(sessionId)
+    await deleteSessionApi(sessionId)
     await get().loadSessions()
     const current = get().currentSession
     if (current?.id === sessionId) {
