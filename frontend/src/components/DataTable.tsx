@@ -64,6 +64,17 @@ export const DataTable: React.FC<DataTableProps> = ({
   const [colsOpen, setColsOpen] = useState(false)
   const colsRef = useRef<HTMLDivElement>(null)
 
+  function hasTextSelectionWithinRow(rowElement: HTMLTableRowElement) {
+    const selection = window.getSelection()
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false
+
+    const { anchorNode, focusNode } = selection
+    return Boolean(
+      (anchorNode && rowElement.contains(anchorNode)) ||
+      (focusNode && rowElement.contains(focusNode))
+    )
+  }
+
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (colsRef.current && !colsRef.current.contains(e.target as Node)) {
@@ -311,7 +322,10 @@ export const DataTable: React.FC<DataTableProps> = ({
             {table.getRowModel().rows.map((row) => (
               <tr
                 key={row.id}
-                onClick={() => onSelectTransaction(row.original.id)}
+                onClick={(e) => {
+                  if (hasTextSelectionWithinRow(e.currentTarget)) return
+                  onSelectTransaction(row.original.id)
+                }}
                 className={`group cursor-pointer transition-colors duration-150 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
                   selectedIds.includes(row.original.id) ? 'bg-[var(--primary-subtle)]' : 'hover:bg-[var(--surface-hover)]'
                 }`}
