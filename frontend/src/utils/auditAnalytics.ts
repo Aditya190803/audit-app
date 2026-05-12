@@ -1,17 +1,18 @@
 import type { Transaction } from '../types/api'
 
-export type ReviewView = 'transactions' | 'clients' | 'parties' | 'exceptions' | 'summary'
+export type ReviewView = 'dashboard' | 'exceptions' | 'summary'
 export type AmountDirection = 'all' | 'debit' | 'credit'
 export type AmountType = 'all' | 'round' | 'high_value'
 export type TagSourceFilter = 'all' | 'manual' | 'auto'
 export type TagConfidenceFilter = 'all' | 'low' | 'high'
-export type ExceptionFilter = 'none' | 'untagged' | 'repeat' | 'high_value' | 'low_confidence' | 'missing_party' | 'cash' | 'same_day'
+export type ExceptionFilter = 'none' | 'untagged' | 'repeat' | 'high_value' | 'low_confidence' | 'missing_party' | 'cash' | 'same_day' | 'weekend' | 'round_amount'
 export type ReviewStatusFilter = 'all' | 'reviewed' | 'unreviewed' | 'needs_review' | 'flagged'
 export type ExportFilter = 'all' | 'exported' | 'not_exported'
 export type ClientActivityType = 'all' | 'both' | 'debit_only' | 'credit_only'
 
 export interface AdvancedFilters {
   clientName: string
+  brokerName: string
   partyName: string
   amountDirection: AmountDirection
   amountType: AmountType
@@ -77,6 +78,7 @@ export interface PaymentMethodBreakdown {
 export interface AuditAnalytics {
   filteredTransactions: Transaction[]
   clientGroups: AuditGroup[]
+  brokerGroups: AuditGroup[]
   partyGroups: AuditGroup[]
   exceptions: {
     untagged: number
@@ -86,6 +88,8 @@ export interface AuditAnalytics {
     missingParty: number
     cash: number
     sameDay: number
+    weekend: number
+    roundAmount: number
   }
   totals: {
     count: number
@@ -102,8 +106,25 @@ export interface AuditAnalytics {
   tagDistribution: { client: number; broker: number; suspicious: number; untagged: number }
 }
 
+export const EMPTY_AUDIT_ANALYTICS: AuditAnalytics = {
+  filteredTransactions: [],
+  clientGroups: [],
+  brokerGroups: [],
+  partyGroups: [],
+  exceptions: {
+    untagged: 0, repeat: 0, highValue: 0, lowConfidence: 0, missingParty: 0, cash: 0, sameDay: 0, weekend: 0, roundAmount: 0
+  },
+  totals: { count: 0, debit: 0, credit: 0, net: 0, tagged: 0, untagged: 0 },
+  monthlyBreakdown: [],
+  paymentMethods: [],
+  topClients: [],
+  topParties: [],
+  tagDistribution: { client: 0, broker: 0, suspicious: 0, untagged: 0 }
+}
+
 export const DEFAULT_ADVANCED_FILTERS: AdvancedFilters = {
   clientName: '',
+  brokerName: '',
   partyName: '',
   amountDirection: 'all',
   amountType: 'all',
@@ -278,6 +299,29 @@ function clientDisplayName(tx: Transaction): string {
   return tx.party_name || 'Unknown'
 }
 
+export function brokerDisplayName(tx: Transaction): string {
+  const brokerTag = tx.tags.find((t) => t.tag_type === 'broker')
+  if (brokerTag) {
+    const matched = extractTagMatchedName(brokerTag.reason)
+    if (matched) return matched
+  }
+  return tx.party_name || 'Unknown'
+}
+
+export function partyDisplayName(tx: Transaction): string {
+  const clientTag = tx.tags.find((t) => t.tag_type === 'client')
+  if (clientTag) {
+    const matched = extractTagMatchedName(clientTag.reason)
+    if (matched) return matched
+  }
+  const brokerTag = tx.tags.find((t) => t.tag_type === 'broker')
+  if (brokerTag) {
+    const matched = extractTagMatchedName(brokerTag.reason)
+    if (matched) return matched
+  }
+  return tx.party_name || tx.description || 'Unknown'
+}
+
 function makeGroup(name: string): AuditGroup {
   return {
     key: groupKey(name),
@@ -419,7 +463,7 @@ export function buildAuditAnalytics(
   filters: AdvancedFilters,
   suspiciousThreshold: number
 ): AuditAnalytics {
-  const repeatParties = repeatKeys(transactions, (tx) => tx.party_name || tx.description || 'Unknown')
+  const repeatParties = repeatKeys(transactions, (tx) => partyDisplayName(tx))
   const sameDayParties = sameDayKeys(transactions)
   const sameAmounts = sameAmountKeys(transactions)
   const bothActivity = clientsWithBothActivity(transactions)
@@ -435,12 +479,18 @@ export function buildAuditAnalytics(
 
   const filteredTransactions = transactions.filter((tx) => {
     const tag = primaryTag(tx)
-    const partyKey = groupKey(tx.party_name || tx.description)
+    const partyKey = groupKey(partyDisplayName(tx))
 
     if (searchQuery && !transactionText(tx).includes(searchQuery.toLowerCase())) return false
     if (filterTags.length > 0 && !filterTags.some((ft) => tx.tags.some((txTag) => txTag.tag_type === ft))) return false
 
-    if (filters.clientName && groupKey(tx.party_name) !== filters.clientName) return false
+    if (filters.clientName && groupKey(clientDisplayName(tx)) !== filters.clientName) return false
+    if (filters.brokerName) {
+      const brokerTag = tx.tags.find((t) => t.tag_type === 'broker')
+      if (!brokerTag) return false
+      const matched = extractTagMatchedName(brokerTag.reason)
+      if (groupKey(matched || tx.party_name) !== filters.brokerName) return false
+    }
     if (filters.partyName && partyKey !== filters.partyName) return false
 
     if (filters.amountDirection === 'debit' && (tx.amount ?? 0) >= 0) return false
@@ -505,6 +555,8 @@ export function buildAuditAnalytics(
     if (filters.exception === 'missing_party' && normalize(tx.party_name).length > 0) return false
     if (filters.exception === 'cash' && !isCash(tx)) return false
     if (filters.exception === 'same_day' && !sameDayParties.has(`${groupKey(tx.party_name)}:${tx.date || 'unknown'}`)) return false
+    if (filters.exception === 'weekend' && !isWeekend(tx.date)) return false
+    if (filters.exception === 'round_amount' && !isRoundAmount(tx.amount ?? 0)) return false
 
     return true
   })
@@ -513,7 +565,11 @@ export function buildAuditAnalytics(
     filteredTransactions.filter((tx) => tx.tags.some((tag) => tag.tag_type === 'client')),
     (tx) => clientDisplayName(tx)
   )
-  let partyGroups = grouped(filteredTransactions, (tx) => tx.party_name || tx.description || 'Unknown')
+  const brokerGroups = grouped(
+    filteredTransactions.filter((tx) => tx.tags.some((tag) => tag.tag_type === 'broker')),
+    (tx) => brokerDisplayName(tx)
+  )
+  let partyGroups = grouped(filteredTransactions, (tx) => partyDisplayName(tx))
 
   if (minGroupCount !== null) {
     clientGroups = clientGroups.filter((g) => g.count >= minGroupCount)
@@ -546,12 +602,14 @@ export function buildAuditAnalytics(
 
   const exceptions = {
     untagged: filteredTransactions.filter((tx) => tx.tags.length === 0).length,
-    repeat: filteredTransactions.filter((tx) => repeatParties.has(groupKey(tx.party_name || tx.description))).length,
+    repeat: filteredTransactions.filter((tx) => repeatParties.has(groupKey(partyDisplayName(tx)))).length,
     highValue: filteredTransactions.filter((tx) => amountAbs(tx) >= suspiciousThreshold).length,
     lowConfidence: filteredTransactions.filter(isLowConfidence).length,
     missingParty: filteredTransactions.filter((tx) => !normalize(tx.party_name)).length,
     cash: filteredTransactions.filter(isCash).length,
     sameDay: filteredTransactions.filter((tx) => sameDayParties.has(`${groupKey(tx.party_name)}:${tx.date || 'unknown'}`)).length,
+    weekend: filteredTransactions.filter((tx) => isWeekend(tx.date)).length,
+    roundAmount: filteredTransactions.filter((tx) => isRoundAmount(tx.amount ?? 0)).length,
   }
 
   const monthlyBreakdown = buildMonthlyBreakdown(filteredTransactions)
@@ -575,6 +633,7 @@ export function buildAuditAnalytics(
   return {
     filteredTransactions,
     clientGroups,
+    brokerGroups,
     partyGroups,
     exceptions,
     totals,

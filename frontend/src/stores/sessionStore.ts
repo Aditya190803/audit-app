@@ -147,8 +147,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   refreshCurrentSession: async () => {
     const current = get().currentSession
     if (current) {
-      await get().loadTransactions(current.id)
-      await get().loadTagSummary(current.id)
+      set({ isLoading: true })
+      try {
+        const [txRes, summaryRes] = await Promise.all([
+          getTransactions(current.id),
+          getTagSummary(current.id)
+        ])
+        set({ transactions: txRes.data, tagSummary: summaryRes.data, isLoading: false })
+      } catch (e) {
+        console.error('Failed to refresh session:', e)
+        set({ isLoading: false })
+      }
     }
   }
 }))

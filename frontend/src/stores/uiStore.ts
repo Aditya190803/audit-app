@@ -3,6 +3,7 @@ import type { AdvancedFilters, ReviewView } from '../utils/auditAnalytics'
 import { DEFAULT_ADVANCED_FILTERS } from '../utils/auditAnalytics'
 
 type ResultFilter = 'all' | 'client' | 'broker' | 'suspicious'
+type ContextPanelMode = 'review' | 'pdf'
 
 interface Toast {
   id: number
@@ -26,6 +27,9 @@ interface UIState {
   advancedFilters: AdvancedFilters
   filtersExpanded: boolean
   toasts: Toast[]
+  // Right panel state
+  contextPanelOpen: boolean
+  contextPanelMode: ContextPanelMode
   pushToast: (toast: Omit<Toast, 'id'>) => void
   popToast: (id: number) => void
   toggleSidebar: () => void
@@ -45,6 +49,9 @@ interface UIState {
   resetAdvancedFilters: () => void
   toggleFiltersExpanded: () => void
   activeFilterCount: () => number
+  toggleContextPanel: () => void
+  setContextPanelMode: (mode: ContextPanelMode) => void
+  setContextPanelOpen: (open: boolean) => void
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -59,10 +66,12 @@ export const useUIStore = create<UIState>((set, get) => ({
   resultFilter: 'all',
   minAmount: null,
   maxAmount: null,
-  reviewView: 'transactions',
+  reviewView: 'dashboard',
   advancedFilters: DEFAULT_ADVANCED_FILTERS,
   filtersExpanded: false,
   toasts: [],
+  contextPanelOpen: true,
+  contextPanelMode: 'review',
   pushToast: (toast) => {
     const id = Date.now()
     set((s) => ({ toasts: [...s.toasts, { ...toast, id }] }))
@@ -82,9 +91,11 @@ export const useUIStore = create<UIState>((set, get) => ({
     resultFilter: 'all',
     minAmount: null,
     maxAmount: null,
-    reviewView: 'transactions',
+    reviewView: 'dashboard',
     advancedFilters: DEFAULT_ADVANCED_FILTERS,
     filtersExpanded: false,
+    contextPanelOpen: true,
+    contextPanelMode: 'review',
   }),
   selectTransaction: (id, multi) => set((s) => {
     if (multi) {
@@ -124,5 +135,8 @@ export const useUIStore = create<UIState>((set, get) => ({
       if (value !== defaults[key]) count++
     }
     return count
-  }
+  },
+  toggleContextPanel: () => set((s) => ({ contextPanelOpen: !s.contextPanelOpen })),
+  setContextPanelMode: (mode) => set({ contextPanelMode: mode }),
+  setContextPanelOpen: (open) => set({ contextPanelOpen: open }),
 }))
