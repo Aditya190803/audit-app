@@ -88,6 +88,7 @@ async def parse_files(
     pdf_service = PDFService()
     all_transactions = []
     pdf_paths = []
+    page_offset = 0
     
     for pdf_file in pdf:
         pdf_path = os.path.join(upload_dir, pdf_file.filename)
@@ -95,7 +96,11 @@ async def parse_files(
             shutil.copyfileobj(pdf_file.file, f)
         pdf_paths.append(pdf_path)
         txns = pdf_service.parse_transactions(pdf_path, password, bank_name=bank_name)
+        for tx in txns:
+            if tx.get("page_number"):
+                tx["page_number"] += page_offset
         all_transactions.extend(txns)
+        page_offset += pdf_service.get_page_count(pdf_path, password)
     
     # Create session
     session_service = SessionService(db)

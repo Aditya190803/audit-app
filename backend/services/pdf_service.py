@@ -131,6 +131,15 @@ class PDFService:
 
         return transactions
 
+    def get_page_count(self, pdf_path: str, password: Optional[str] = None) -> int:
+        """Return the number of pages in a PDF."""
+        doc = fitz.open(pdf_path)
+        if doc.is_encrypted and password:
+            doc.authenticate(password)
+        page_count = len(doc)
+        doc.close()
+        return page_count
+
     def get_text_with_positions(self, pdf_path: str, password: Optional[str] = None) -> List[Dict[str, Any]]:
         """Extract text with bounding box positions for highlighting."""
         doc = fitz.open(pdf_path)
