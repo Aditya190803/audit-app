@@ -12,6 +12,7 @@ from backend.services.parsers.icici_detailed import ICICIDetailedParser
 from backend.services.parsers.kotak_mahindra import KotakMahindraParser
 from backend.services.parsers.axis_bank import AxisBankParser
 from backend.services.parsers.idfc_bank import IDFCBankParser
+from backend.services.parsers.hdfc_bank import HDFCBankParser
 from backend.services.parsers.union_bank import UnionBankParser
 from backend.services.parsers.sbi_standard import SBIStandardParser
 from backend.services.parsers.sbi_compact import SBICompactParser
@@ -206,6 +207,7 @@ class AccuracyTests(unittest.TestCase):
         names = [p.name for p in registry.parsers]
         self.assertIn("axis_bank", names)
         self.assertIn("idfc_bank", names)
+        self.assertIn("hdfc_bank", names)
 
     def test_axis_bank_detects_table(self):
         parser = AxisBankParser()
@@ -236,6 +238,35 @@ class AccuracyTests(unittest.TestCase):
         self.assertIsNotNone(tx)
         self.assertEqual(tx["amount"], 100000.0)
         self.assertIn("Kotak Securities", tx["party_name"])
+
+    def test_hdfc_bank_detects_table(self):
+        parser = HDFCBankParser()
+        tables = [{"data": [["Date", "Narration", "Chq./Ref.No.", "ValueDt", "WithdrawalAmt.", "DepositAmt.", "ClosingBalance"]], "page_number": 1}]
+        score = parser.detect(tables, [])
+        self.assertGreater(score, 0.9)
+
+    def test_hdfc_bank_expands_packed_rows_and_uses_balance_delta_signs(self):
+        parser = HDFCBankParser()
+        rows = parser._table_rows([[
+            "Date", "Narration", "Chq./Ref.No.", "ValueDt", "WithdrawalAmt.", "DepositAmt.", "ClosingBalance"
+        ], [
+            "01/11/23\n01/11/23\n02/11/23",
+            "UPI-JAGATKUMARSINGH-JAGATKUMAR1974@OKH\nDFCBANK-HDFC0000322-330592196782-UPI\nUPI-MANSOORI IMTIYAZ-IMTIYAZMANSURI2528\n@OKICICI-SBIN0030371-330595887924-UPI\nCASHDEPOSIT-XXXXXXXXXX0896-CHALAROAD",
+            "0000330592196782\n0000330595887924\n0000000000004468",
+            "01/11/23\n01/11/23\n02/11/23",
+            "6,000.00",
+            "1,000.00\n6,000.00",
+            "283,935.65\n277,935.65\n283,935.65",
+        ]])
+        self.assertEqual(len(rows), 3)
+
+        first = parser._extract_row(rows[0], None)
+        second = parser._extract_row(rows[1], 283935.65)
+        third = parser._extract_row(rows[2], 277935.65)
+        self.assertEqual(first["amount"], 1000.0)
+        self.assertEqual(second["amount"], -6000.0)
+        self.assertEqual(third["amount"], 6000.0)
+        self.assertEqual(third["party_name"], "Cash Deposit")
 
     def test_base_parser_upi_p2m_extraction(self):
         party = BaseParser._extract_party_from_description(

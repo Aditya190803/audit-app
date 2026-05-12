@@ -7,6 +7,7 @@ from backend.services.parsers.sbi_compact import SBICompactParser
 from backend.services.parsers.icici_numbered import ICICINumberedParser
 from backend.services.parsers.axis_bank import AxisBankParser
 from backend.services.parsers.idfc_bank import IDFCBankParser
+from backend.services.parsers.hdfc_bank import HDFCBankParser
 from backend.services.parsers.generic import GenericParser
 
 
@@ -54,4 +55,5 @@ registry.register(SBICompactParser)
 registry.register(ICICINumberedParser)
 registry.register(AxisBankParser)
 registry.register(IDFCBankParser)
+registry.register(HDFCBankParser)
 registry.register(GenericParser)
