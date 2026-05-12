@@ -12,7 +12,8 @@ import {
   Building2,
   AlertTriangle,
   LayoutList,
-  CheckSquare
+  CheckSquare,
+  Search
 } from 'lucide-react'
 
 function firstPdfPath(pdf_path: string | null): string | null {
@@ -63,6 +64,7 @@ export const AppShell: React.FC = () => {
   const [renameValue, setRenameValue] = useState('')
   const renameInputRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const [sessionSearch, setSessionSearch] = useState('')
 
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
 
@@ -159,6 +161,12 @@ export const AppShell: React.FC = () => {
   }, [transactions])
 
   // Count transactions per result filter from current view
+  const filteredSessions = useMemo(() => {
+    if (!sessionSearch) return sessions
+    const q = sessionSearch.toLowerCase()
+    return sessions.filter((s) => (s.name || `Session ${s.id}`).toLowerCase().includes(q))
+  }, [sessions, sessionSearch])
+
   const filterCounts = useMemo(() => {
     const counts = { all: transactions.length, client: 0, broker: 0, suspicious: 0 }
     for (const tx of transactions) {
@@ -321,14 +329,24 @@ export const AppShell: React.FC = () => {
         </div>
 
         <div className="flex-1 overflow-y-auto py-3">
-          <div className="px-3 py-1.5">
+          <div className="px-3 py-1.5 space-y-2">
             <span className="text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider">
               Sessions
             </span>
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--text-tertiary)]" strokeWidth={1.5} />
+              <input
+                type="text"
+                value={sessionSearch}
+                onChange={(e) => setSessionSearch(e.target.value)}
+                placeholder="Search sessions..."
+                className="w-full pl-7 pr-2 py-1 text-xs bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-md)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)] focus:border-transparent placeholder:text-[var(--text-tertiary)]"
+              />
+            </div>
           </div>
 
           <div className="px-2 space-y-0.5">
-            {sessions.map((session) => (
+            {filteredSessions.map((session) => (
               <button
                 key={session.id}
                 onClick={() => { if (renameId !== session.id) setCurrentSession(session) }}
@@ -366,9 +384,9 @@ export const AppShell: React.FC = () => {
             ))}
           </div>
 
-          {sessions.length === 0 && (
+          {filteredSessions.length === 0 && (
             <div className="px-4 py-3 text-xs text-[var(--text-tertiary)]">
-              No sessions yet
+              {sessionSearch ? 'No sessions match your search' : 'No sessions yet'}
             </div>
           )}
         </div>
@@ -442,6 +460,22 @@ export const AppShell: React.FC = () => {
                     className="text-[10px] px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--danger-subtle)] text-[var(--danger)] hover:brightness-95 transition-all font-medium"
                   >
                     Suspicious
+                  </button>
+                  <span className="w-px h-4 bg-[var(--primary)]/20 mx-0.5" />
+                  <button
+                    onClick={() => {
+                      const ids = selectedTransactionIds.flatMap((txId) => {
+                        const tx = transactions.find((t) => t.id === txId)
+                        return tx?.tags.map((t) => t.id) || []
+                      })
+                      if (ids.length > 0) {
+                        bulkRemoveTags(ids).then(() => refreshCurrentSession())
+                        clearSelection()
+                      }
+                    }}
+                    className="text-[10px] px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--surface-hover)] text-[var(--text-secondary)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-all font-medium"
+                  >
+                    Remove tags
                   </button>
                   <span className="w-px h-4 bg-[var(--primary)]/20 mx-0.5" />
                   <button
@@ -573,6 +607,7 @@ export const AppShell: React.FC = () => {
                       filterTags={[]}
                       minAmount={minAmount}
                       maxAmount={maxAmount}
+                      sessionId={currentSession?.id}
                     />
                   </div>
                 )}

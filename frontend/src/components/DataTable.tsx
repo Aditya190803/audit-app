@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef, useEffect } from 'react'
+import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react'
 import {
   useReactTable,
   getCoreRowModel,
@@ -24,19 +24,22 @@ interface DataTableProps {
   filterTags: string[]
   minAmount: number | null
   maxAmount: number | null
+  sessionId?: number | null
 }
 
-const STORAGE_KEY = 'datatable_visible_columns'
+function storageKey(sessionId?: number | null): string {
+  return sessionId ? `datatable_visible_columns_${sessionId}` : 'datatable_visible_columns'
+}
 
-function loadVisibility(): VisibilityState {
+function loadVisibility(sessionId?: number | null): VisibilityState {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(storageKey(sessionId))
     return raw ? JSON.parse(raw) : {}
   } catch { return {} }
 }
 
-function saveVisibility(state: VisibilityState) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+function saveVisibility(state: VisibilityState, sessionId?: number | null) {
+  localStorage.setItem(storageKey(sessionId), JSON.stringify(state))
 }
 
 const ALL_COLUMNS = [
@@ -49,6 +52,7 @@ const ALL_COLUMNS = [
   { id: 'reason', label: 'Reason' },
   { id: 'page_number', label: 'Page' },
   { id: 'pdf_filename', label: 'PDF' },
+  { id: 'actions', label: 'Actions' },
 ]
 
 export const DataTable: React.FC<DataTableProps> = ({
@@ -60,12 +64,14 @@ export const DataTable: React.FC<DataTableProps> = ({
   searchQuery,
   filterTags,
   minAmount,
-  maxAmount
+  maxAmount,
+  sessionId,
 }) => {
   const [sorting, setSorting] = useState<SortingState>([])
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(loadVisibility)
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => loadVisibility(sessionId))
   const [colsOpen, setColsOpen] = useState(false)
   const colsRef = useRef<HTMLDivElement>(null)
+  const lastClickedId = useRef<number | null>(null)
 
   function hasTextSelectionWithinRow(rowElement: HTMLTableRowElement) {
     const selection = window.getSelection()
@@ -107,6 +113,16 @@ export const DataTable: React.FC<DataTableProps> = ({
     })
   }, [transactions, searchQuery, filterTags, minAmount, maxAmount])
 
+  const handleCycleTag = useCallback((tag: Tag) => {
+    const cycle: Record<string, string | null> = { client: 'broker', broker: 'suspicious', suspicious: null }
+    const next = cycle[tag.tag_type]
+    if (next) {
+      onAddTag(tag.transaction_id, next as Tag['tag_type'])
+    } else {
+      onRemoveTag(tag.id)
+    }
+  }, [onAddTag, onRemoveTag])
+
   const columns = useMemo<ColumnDef<Transaction>[]>(() => [
     {
       id: 'select',
@@ -115,7 +131,20 @@ export const DataTable: React.FC<DataTableProps> = ({
         <button
           onClick={(e) => {
             e.stopPropagation()
-            onSelectTransaction(row.original.id, true)
+            if (e.shiftKey && lastClickedId.current !== null) {
+              const rows = table.getRowModel().rows
+              const currentIdx = rows.findIndex((r) => r.original.id === row.original.id)
+              const lastIdx = rows.findIndex((r) => r.original.id === lastClickedId.current)
+              if (currentIdx !== -1 && lastIdx !== -1) {
+                const [start, end] = currentIdx > lastIdx ? [lastIdx, currentIdx] : [currentIdx, lastIdx]
+                for (let i = start; i <= end; i++) {
+                  onSelectTransaction(rows[i].original.id, true)
+                }
+              }
+            } else {
+              onSelectTransaction(row.original.id, true)
+            }
+            lastClickedId.current = row.original.id
           }}
           className="p-1 text-[var(--text-tertiary)] hover:text-[var(--primary)] transition-colors duration-150"
         >
@@ -198,7 +227,7 @@ export const DataTable: React.FC<DataTableProps> = ({
         const tx = info.row.original
         return (
           <div className="flex items-center gap-2 min-w-0">
-            <TagBadgeList tags={tx.tags} onRemoveTag={onRemoveTag} />
+            <TagBadgeList tags={tx.tags} onRemoveTag={onRemoveTag} onCycleTag={handleCycleTag} />
             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
               {(['client', 'broker', 'suspicious'] as const).map((t) => (
                 <button
@@ -317,7 +346,7 @@ export const DataTable: React.FC<DataTableProps> = ({
     onColumnVisibilityChange: (updater) => {
       setColumnVisibility(updater)
       const next = typeof updater === 'function' ? updater(columnVisibility) : updater
-      saveVisibility(next)
+      saveVisibility(next, sessionId)
     },
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -357,7 +386,7 @@ export const DataTable: React.FC<DataTableProps> = ({
                     onClick={() => {
                       setColumnVisibility(prev => {
                         const next = { ...prev, [col.id]: !isVisible }
-                        saveVisibility(next)
+                        saveVisibility(next, sessionId)
                         return next
                       })
                     }}

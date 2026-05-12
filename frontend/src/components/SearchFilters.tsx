@@ -1,5 +1,5 @@
-import React from 'react'
-import { Filter, Search, X, ChevronDown, ChevronUp, IndianRupee, Calendar, Users, FileText } from 'lucide-react'
+import React, { useState, useRef, useEffect } from 'react'
+import { Filter, Search, X, ChevronDown, ChevronUp, IndianRupee, Calendar, Users, FileText, Save, Bookmark } from 'lucide-react'
 import { type AdvancedFilters, type AmountDirection, type AmountType, type TagSourceFilter, type TagConfidenceFilter, type ClientActivityType, type ExceptionFilter } from '../utils/auditAnalytics'
 
 interface SearchFiltersProps {
@@ -84,7 +84,52 @@ export const SearchFilters: React.FC<SearchFiltersProps> = ({
   onToggleFiltersExpanded,
   onRemoveFilterTag,
 }) => {
+  const [presets, setPresets] = useState<Record<string, Partial<AdvancedFilters>>>(() => {
+    try { return JSON.parse(localStorage.getItem('filter_presets') || '{}') } catch { return {} }
+  })
+  const [presetOpen, setPresetOpen] = useState(false)
+  const [presetName, setPresetName] = useState('')
+  const presetRef = useRef<HTMLDivElement>(null)
   const hasFilters = activeFilterCount > 0
+
+  const savePreset = () => {
+    const name = presetName.trim()
+    if (!name) return
+    const next = { ...presets, [name]: { ...advancedFilters } }
+    setPresets(next)
+    localStorage.setItem('filter_presets', JSON.stringify(next))
+    setPresetName('')
+    setPresetOpen(false)
+  }
+
+  const loadPreset = (name: string) => {
+    const preset = presets[name]
+    if (!preset) return
+    const entries = Object.entries(preset) as [keyof AdvancedFilters, unknown][]
+    for (const [key, value] of entries) {
+      onAdvancedFilterChange(key, value as AdvancedFilters[keyof AdvancedFilters])
+    }
+    setPresetOpen(false)
+  }
+
+  const deletePreset = (name: string) => {
+    const next = { ...presets }
+    delete next[name]
+    setPresets(next)
+    localStorage.setItem('filter_presets', JSON.stringify(next))
+  }
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (presetRef.current && !presetRef.current.contains(e.target as Node)) {
+        setPresetOpen(false)
+      }
+    }
+    if (presetOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [presetOpen])
 
   /* ── Build active-filter chip list ──────────────────────────── */
   const activeChips: { label: string; onRemove: () => void }[] = []
@@ -215,6 +260,64 @@ export const SearchFilters: React.FC<SearchFiltersProps> = ({
             Clear
           </button>
         )}
+
+        {/* Filter presets */}
+        <div className="relative" ref={presetRef}>
+          <button
+            onClick={() => setPresetOpen((o) => !o)}
+            className="flex items-center gap-1.5 h-8 px-2.5 text-xs font-medium rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] transition-colors duration-150"
+          >
+            <Bookmark className="h-3.5 w-3.5" strokeWidth={1.5} />
+            Presets
+            {Object.keys(presets).length > 0 && (
+              <span className="ml-0.5 text-[10px] px-1 py-0.5 rounded-full bg-[var(--bg)] font-semibold">
+                {Object.keys(presets).length}
+              </span>
+            )}
+          </button>
+          {presetOpen && (
+            <div className="absolute right-0 top-full mt-1 z-30 min-w-[200px] bg-white border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-md)] overflow-hidden">
+              <div className="p-2 border-b border-[var(--border)] flex gap-1.5">
+                <input
+                  type="text"
+                  value={presetName}
+                  onChange={(e) => setPresetName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') savePreset() }}
+                  placeholder="Preset name..."
+                  className="flex-1 min-w-0 px-2 py-1 text-xs border border-[var(--border)] rounded-[var(--radius-sm)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)] placeholder:text-[var(--text-tertiary)]"
+                />
+                <button
+                  onClick={savePreset}
+                  disabled={!presetName.trim()}
+                  className="px-2 py-1 text-xs font-medium text-white bg-[var(--primary)] rounded-[var(--radius-sm)] hover:brightness-110 transition-all disabled:opacity-40"
+                >
+                  <Save className="h-3 w-3" strokeWidth={2} />
+                </button>
+              </div>
+              {Object.keys(presets).length === 0 && (
+                <div className="px-3 py-4 text-xs text-[var(--text-tertiary)] text-center">
+                  No saved presets
+                </div>
+              )}
+              {Object.entries(presets).map(([name]) => (
+                <div key={name} className="flex items-center gap-1 px-2 py-1 text-xs text-[var(--text-primary)] hover:bg-[var(--surface-hover)] group">
+                  <button
+                    onClick={() => loadPreset(name)}
+                    className="flex-1 text-left truncate"
+                  >
+                    {name}
+                  </button>
+                  <button
+                    onClick={() => deletePreset(name)}
+                    className="p-0.5 text-[var(--text-tertiary)] hover:text-[var(--danger)] opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X className="h-3 w-3" strokeWidth={2} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Active filter chips ────────────────────────────────── */}

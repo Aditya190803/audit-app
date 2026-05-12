@@ -2,19 +2,19 @@
 
 ## P0 (Blocks Core Workflow)
 
-- [ ] **Bulk tag operations** — select multiple transactions (Shift+click range) and apply/remove a tag in one click. Currently only single-tag via keyboard shortcuts (`Ctrl+1/2/3`).
-- [ ] **Suspicious keyword editor UI** — the settings panel shows `suspicious_threshold` as a slider but has no UI for editing `suspicious_keywords`. Add a tag/chip input to add/remove keywords.
-- [ ] **Undo for manual tags** — "Tag removed" toast with an Undo button that restores the previous tag state (currently manual tag overwrites are immediate and silent).
+- [x] **Bulk tag operations** — select multiple transactions (Shift+click range) and apply/remove a tag in one click. Currently only single-tag via keyboard shortcuts (`Ctrl+1/2/3`).
+- [x] **Suspicious keyword editor UI** — the settings panel shows `suspicious_threshold` as a slider but has no UI for editing `suspicious_keywords`. Add a tag/chip input to add/remove keywords.
+- [x] **Undo for manual tags** — "Tag removed" toast with an Undo button that restores the previous tag state (currently manual tag overwrites are immediate and silent).
 
 ## P1 (Major Workflow Improvement)
 
-- [ ] **Upload progress bar** — parsing multiple PDFs takes 30-60s. Show per-file progress with filename, page count, and ETA instead of a generic spinner.
-- [ ] **Column visibility toggles** — let users hide/show columns (phone, raw_text, bounding_box_json, etc.) to reduce visual noise. Persist preference per session.
-- [ ] **Session search/filter** — a search box above the session list to filter by name, date range, or tag counts.
-- [ ] **Session rename** — double-click the session name in the sidebar to rename it without going through settings.
-- [ ] **Export selection only** — "Export → Selected" option that exports only the checked rows, using the same CSV/Excel/PDF formats.
-- [ ] **Per-PDF password input** — currently one password field for all PDFs. If multiple encrypted PDFs have different passwords, there's no way to provide them. Show a password input per encrypted file.
-- [ ] **Instant PDF validation on drop** — check the file header (`%PDF`) on drop, before the user clicks "Start Audit". Show a red error badge on invalid files immediately.
+- [x] **Upload progress bar** — parsing multiple PDFs takes 30-60s. Show per-file progress with filename, page count, and ETA instead of a generic spinner.
+- [x] **Column visibility toggles** — let users hide/show columns (phone, raw_text, bounding_box_json, etc.) to reduce visual noise. Persist preference per session.
+- [x] **Session search/filter** — a search box above the session list to filter by name, date range, or tag counts.
+- [x] **Session rename** — double-click the session name in the sidebar to rename it without going through settings.
+- [x] **Export selection only** — "Export → Selected" option that exports only the checked rows, using the same CSV/Excel/PDF formats.
+- [x] **Per-PDF password input** — currently one password field for all PDFs. If multiple encrypted PDFs have different passwords, there's no way to provide them. Show a password input per encrypted file.
+- [x] **Instant PDF validation on drop** — check the file header (`%PDF`) on drop, before the user clicks "Start Audit". Show a red error badge on invalid files immediately.
 
 ## P2 (Nice to Have)
 
@@ -24,9 +24,9 @@
 - [ ] PDF fingerprint / dedup — hash PDFs on upload and warn if same file processed twice
 
 ### Data Table & Review
-- [ ] Inline edit of transaction tags — click a tag badge to cycle client → broker → suspicious → none
+- [x] Inline edit of transaction tags — click a tag badge to cycle client → broker → suspicious → none
 - [ ] Tag history tooltip — hover to see when applied, by whom, previous tags
-- [ ] Saved filter presets — save common filter combos as named presets
+- [x] Saved filter presets — save common filter combos as named presets
 
 ### Sidebar & Navigation
 - [ ] Session groups/folders
@@ -38,7 +38,7 @@
 - [ ] Export summary report — one-page PDF with metadata + tag counts
 
 ### Backend / Data
-- [ ] Async PDF parsing — background task with polling endpoint
+- [x] Async PDF parsing — background task with polling endpoint
 - [ ] Session merge — combine two sessions
 - [ ] Session split — create new session from selected transactions
 - [ ] S3/blob storage for uploads

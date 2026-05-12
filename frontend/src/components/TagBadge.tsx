@@ -4,6 +4,7 @@ import type { Tag } from '../types/api'
 interface TagBadgeProps {
   tag: Tag
   onRemove?: (tagId: number) => void
+  onCycle?: (tag: Tag) => void
   showConfidence?: boolean
 }
 
@@ -80,11 +81,20 @@ export function formatTagReason(tag: Tag): string {
   return tag.reason || tag.tag_type
 }
 
-export const TagBadge: React.FC<TagBadgeProps> = ({ tag, onRemove, showConfidence = true }) => {
+export const TagBadge: React.FC<TagBadgeProps> = ({ tag, onRemove, onCycle, showConfidence = true }) => {
   const cls = tagClasses[tag.tag_type] || tagClasses.client
 
   return (
-    <span className={cls} title={tag.reason || tag.tag_type}>
+    <span
+      className={`${cls} ${onCycle ? 'cursor-pointer' : ''}`}
+      title={tag.reason || tag.tag_type}
+      onClick={(e) => {
+        if (onCycle) {
+          e.stopPropagation()
+          onCycle(tag)
+        }
+      }}
+    >
       <span className="capitalize">{tag.tag_type}</span>
       {showConfidence && tag.confidence < 1.0 && (
         <span className="ml-1 opacity-70">
@@ -109,12 +119,13 @@ export const TagBadge: React.FC<TagBadgeProps> = ({ tag, onRemove, showConfidenc
 export const TagBadgeList: React.FC<{
   tags: Tag[]
   onRemoveTag?: (tagId: number) => void
-}> = ({ tags, onRemoveTag }) => {
+  onCycleTag?: (tag: Tag) => void
+}> = ({ tags, onRemoveTag, onCycleTag }) => {
   if (!tags || tags.length === 0) return (
     <span className="text-xs text-[var(--text-tertiary)] italic">Untagged</span>
   )
   const tag = tags[0]
   return (
-    <TagBadge tag={tag} onRemove={onRemoveTag} showConfidence={false} />
+    <TagBadge tag={tag} onRemove={onRemoveTag} onCycle={onCycleTag} showConfidence={false} />
   )
 }

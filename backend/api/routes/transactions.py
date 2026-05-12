@@ -78,6 +78,16 @@ async def parse_files(
 ):
     """Parse one or more PDFs and client list, create session, and auto-tag transactions."""
     _set_parse_progress(progress_id, 1, "Preparing files...", "preparing")
+    # Parse per-file passwords if sent as JSON map
+    pdf_passwords: dict = {}
+    if password:
+        try:
+            parsed = json.loads(password)
+            if isinstance(parsed, dict):
+                pdf_passwords = parsed
+                password = None  # use per-file passwords
+        except (json.JSONDecodeError, TypeError):
+            pass  # single password fallback
     upload_dir = os.path.abspath("uploads")
     os.makedirs(upload_dir, exist_ok=True)
     
@@ -173,7 +183,7 @@ async def parse_files(
                 total_pages=total,
             )
 
-        txns = await run_in_threadpool(pdf_service.parse_transactions, pdf_path, password, bank_name, report_pdf_progress)
+        txns = await run_in_threadpool(pdf_service.parse_transactions, pdf_path, pdf_passwords.get(pdf_file.filename, password), bank_name, report_pdf_progress)
         for tx in txns:
             if tx.get("page_number"):
                 tx["page_number"] += page_offset
@@ -200,7 +210,7 @@ async def parse_files(
                     break
             tx["payment_method"] = detected
         all_transactions.extend(txns)
-        page_offset += await run_in_threadpool(pdf_service.get_page_count, pdf_path, password)
+        page_offset += await run_in_threadpool(pdf_service.get_page_count, pdf_path, pdf_passwords.get(pdf_file.filename, password or ""))
         _set_parse_progress(
             progress_id,
             15 + int(file_index / max(len(pdf), 1) * 45),

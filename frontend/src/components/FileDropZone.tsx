@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react'
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { FileText, FileSpreadsheet, Lock, X, ArrowRight, ChevronDown, Search, Check, FolderOpen, FileIcon, RefreshCw, Building2 } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -75,10 +75,11 @@ function bestNameColumnMatch(headers: string[]): string | null {
 export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isProcessing, processingProgress, brokers = [] }) => {
   const [pdfFiles, setPdfFiles] = useState<File[]>([])
   const [clientListFile, setClientListFile] = useState<File | null>(null)
-  const [password, setPassword] = useState('')
+  const [passwords, setPasswords] = useState<Record<string, string>>({})
   const [showPassword, setShowPassword] = useState(false)
-  const [isEncrypted, setIsEncrypted] = useState(false)
+  const [encryptedFileNames, setEncryptedFileNames] = useState<string[]>([])
   const [invalidPdfNames, setInvalidPdfNames] = useState<string[]>([])
+  const progressStartRef = useRef<number>(0)
   const [threshold, setThreshold] = useState<number>(50000)
   const [sheetName, setSheetName] = useState('')
   const [sheetNames, setSheetNames] = useState<string[]>([])
@@ -147,7 +148,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
         setPdfFiles([pdfFile])
         setClientListFile(clientFile)
         setShowPassword(false)
-        setPassword('')
+        setPasswords({})
       }
     } catch (e) {
       console.error('Failed to load example files:', e)
@@ -249,14 +250,14 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
   // Validate PDF headers + detect encryption
   useEffect(() => {
     if (pdfFiles.length === 0) {
-      setIsEncrypted(false)
+      setEncryptedFileNames([])
       setShowPassword(false)
       setInvalidPdfNames([])
       return
     }
-    let encFound = false
     let completed = 0
     const badNames: string[] = []
+    const encNames: string[] = []
     for (const f of pdfFiles) {
       // Check header for %PDF magic bytes
       const headerBlob = f.slice(0, 4)
@@ -271,12 +272,12 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
         const trailerReader = new FileReader()
         trailerReader.onload = (te) => {
           const text = te.target?.result as string
-          if (text.includes('/Encrypt')) encFound = true
+          if (text.includes('/Encrypt')) encNames.push(f.name)
           completed++
           if (completed === pdfFiles.length) {
             setInvalidPdfNames(badNames)
-            setIsEncrypted(encFound)
-            if (encFound) setShowPassword(true)
+            setEncryptedFileNames(encNames)
+            if (encNames.length > 0) setShowPassword(true)
           }
         }
         trailerReader.readAsText(trailerBlob)
@@ -406,8 +407,9 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
 
   const handleProcess = () => {
     if (pdfFiles.length > 0 && clientListFile) {
+      const hasPasswords = Object.values(passwords).some(Boolean)
       const options: Parameters<typeof onFilesSelected>[3] = {
-        password: password || undefined,
+        password: hasPasswords ? JSON.stringify(passwords) : undefined,
         excludedBrokers: excludedBrokers.size > 0 ? Array.from(excludedBrokers) : undefined,
         apCodes: apCodeEnabled && selectedApCodes.size > 0 ? Array.from(selectedApCodes) : undefined,
         bankName: bankName || undefined
@@ -424,6 +426,26 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
 
   const isReady = pdfFiles.length > 0 && clientListFile && !isProcessing && nameColumn.trim().length > 0 && invalidPdfNames.length === 0
   const progressPercent = Math.max(0, Math.min(100, processingProgress?.percent ?? 0))
+
+  // ETA calculation
+  if (isProcessing && progressPercent > 0 && progressStartRef.current === 0) {
+    progressStartRef.current = Date.now()
+  }
+  if (!isProcessing) {
+    progressStartRef.current = 0
+  }
+  const etaText = useMemo(() => {
+    if (!isProcessing || progressPercent === 0) return ''
+    const elapsed = (Date.now() - progressStartRef.current) / 1000
+    if (elapsed < 5 || progressPercent < 5) return ''
+    const total = (elapsed / progressPercent) * 100
+    const remaining = total - elapsed
+    if (remaining < 5) return 'Almost done'
+    if (remaining < 60) return `~${Math.round(remaining)}s remaining`
+    const mins = Math.floor(remaining / 60)
+    const secs = Math.round(remaining % 60)
+    return `~${mins}m ${secs}s remaining`
+  }, [isProcessing, progressPercent])
 
   const getClientListLabel = (file: File) => {
     if (file.name.endsWith('.csv')) return 'CSV'
@@ -541,11 +563,11 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
                   </p>
                   <p className="text-xs text-[var(--text-tertiary)]">{formatFileSize(f.size)}{isInvalid ? ' — invalid PDF' : ''}</p>
                 </div>
-                {i === 0 && isEncrypted && (
+                {encryptedFileNames.includes(f.name) && (
                   <button
                     onClick={() => setShowPassword(!showPassword)}
                     className={`p-1.5 rounded-[var(--radius-sm)] transition-colors duration-150 ${showPassword ? 'text-[var(--primary)]' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'}`}
-                    title="Password protected"
+                    title={passwords[f.name] ? 'Password set' : 'Password required'}
                   >
                     <Lock className="h-3.5 w-3.5" strokeWidth={2} />
                   </button>
@@ -554,7 +576,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
                   onClick={() => {
                     const next = pdfFiles.filter((_, j) => j !== i)
                     setPdfFiles(next)
-                    if (next.length === 0) { setPassword(''); setShowPassword(false); setIsEncrypted(false); setInvalidPdfNames([]) }
+                    if (next.length === 0) { setPasswords({}); setShowPassword(false); setEncryptedFileNames([]); setInvalidPdfNames([]) }
                   }}
                   className="p-1 text-[var(--text-tertiary)] hover:text-[var(--danger)] transition-colors duration-150"
                 >
@@ -564,14 +586,23 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
             )
           })}
 
-          {showPassword && pdfFiles.length > 0 && (
-            <input
-              type="password"
-              placeholder="Enter PDF password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="input-field"
-            />
+          {showPassword && encryptedFileNames.length > 0 && (
+            <div className="space-y-2 border-l-2 border-[var(--warning)] pl-3 ml-1">
+              <p className="text-[11px] font-medium text-[var(--warning)]">Password required for encrypted PDFs:</p>
+              {encryptedFileNames.map((name) => (
+                <div key={name} className="flex items-center gap-2">
+                  <Lock className="h-3 w-3 text-[var(--text-tertiary)] shrink-0" strokeWidth={1.5} />
+                  <span className="text-xs text-[var(--text-secondary)] truncate flex-1">{name}</span>
+                  <input
+                    type="password"
+                    placeholder="Enter password"
+                    value={passwords[name] || ''}
+                    onChange={(e) => setPasswords((prev) => ({ ...prev, [name]: e.target.value }))}
+                    className="input-field w-40 text-xs"
+                  />
+                </div>
+              ))}
+            </div>
           )}
 
           {clientListFile && (
@@ -978,12 +1009,15 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
 
           <div className="flex items-center justify-between text-[11px] text-[var(--text-tertiary)]">
             <span className="capitalize">{(processingProgress?.stage || 'queued').replace(/_/g, ' ')}</span>
-            {processingProgress?.total_files && (
-              <span>
-                PDF {processingProgress.current_file || 1} of {processingProgress.total_files}
-                {processingProgress.total_pages ? ` · Page ${processingProgress.current_page || 1} of ${processingProgress.total_pages}` : ''}
-              </span>
-            )}
+            <span className="flex items-center gap-2">
+              {etaText && <span>{etaText}</span>}
+              {processingProgress?.total_files && (
+                <span>
+                  PDF {processingProgress.current_file || 1} of {processingProgress.total_files}
+                  {processingProgress.total_pages ? ` · Page ${processingProgress.current_page || 1} of ${processingProgress.total_pages}` : ''}
+                </span>
+              )}
+            </span>
           </div>
         </div>
       )}
