@@ -1,7 +1,7 @@
 import fitz  # PyMuPDF
 import pdfplumber
 import os
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
 import pytesseract
 from PIL import Image
 import io
@@ -11,7 +11,8 @@ class PDFService:
         if tesseract_path and os.path.exists(tesseract_path):
             pytesseract.pytesseract.tesseract_cmd = tesseract_path
     
-    def extract_text(self, pdf_path: str, password: Optional[str] = None) -> List[Dict[str, Any]]:
+    def extract_text(self, pdf_path: str, password: Optional[str] = None,
+                     progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Dict[str, Any]]:
         """Extract text and metadata from all pages."""
         doc = fitz.open(pdf_path)
         is_encrypted = doc.is_encrypted
@@ -36,6 +37,8 @@ class PDFService:
                 "width": page.rect.width,
                 "height": page.rect.height
             })
+            if progress_callback:
+                progress_callback(page_num + 1, len(doc))
         
         doc.close()
         return pages
@@ -50,7 +53,8 @@ class PDFService:
         except Exception as e:
             return f""
     
-    def extract_tables(self, pdf_path: str, password: Optional[str] = None) -> List[Dict[str, Any]]:
+    def extract_tables(self, pdf_path: str, password: Optional[str] = None,
+                       progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Dict[str, Any]]:
         """Extract tables from PDF using pdfplumber."""
         tables = []
         try:
@@ -62,12 +66,15 @@ class PDFService:
                             "page_number": page_num + 1,
                             "data": table
                         })
+                    if progress_callback:
+                        progress_callback(page_num + 1, len(pdf.pages))
         except Exception as e:
             print(f"[PDFService] Table extraction failed: {e}")
         return tables
     
     def parse_transactions(self, pdf_path: str, password: Optional[str] = None, 
-                           bank_name: Optional[str] = None) -> List[Dict[str, Any]]:
+                           bank_name: Optional[str] = None,
+                           progress_callback: Optional[Callable[[str, int, int], None]] = None) -> List[Dict[str, Any]]:
         """Parse transactions from PDF using the parser registry.
         
         Strategy: if bank_name is specified, use that parser. Otherwise detect
@@ -75,8 +82,16 @@ class PDFService:
         next-highest-scoring parser before falling back to generic.
         """
         from backend.services.parsers import registry
-        tables = self.extract_tables(pdf_path, password)
-        pages = self.extract_text(pdf_path, password)
+        def table_progress(done: int, total: int):
+            if progress_callback:
+                progress_callback("tables", done, total)
+
+        def text_progress(done: int, total: int):
+            if progress_callback:
+                progress_callback("text", done, total)
+
+        tables = self.extract_tables(pdf_path, password, table_progress)
+        pages = self.extract_text(pdf_path, password, text_progress)
 
         parser = None
         if bank_name:

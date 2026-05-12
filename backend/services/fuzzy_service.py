@@ -288,7 +288,8 @@ class FuzzyService:
             and t not in TRANSACTION_NOISE_TOKENS
             and len(t) >= 3
         ]
-        if len(meaningful) < 2 or not (set(meaningful) & BROKER_ENTITY_WORDS):
+        broker_has_entity_context = bool(set(meaningful) & BROKER_ENTITY_WORDS) or "limited" in broker_tokens or "ltd" in broker_tokens
+        if len(meaningful) < 2 or not broker_has_entity_context:
             return False
 
         distinctive = [
@@ -309,8 +310,21 @@ class FuzzyService:
         # Some statements include just a brand/acronym plus the entity word.
         for brand in distinctive:
             for entity in set(meaningful) & BROKER_ENTITY_WORDS:
-                pair = f"{brand}{entity}"
-                if len(pair) >= 8 and pair in compact_text:
+                entity_variants = {entity}
+                if entity == "limited":
+                    entity_variants.update({"ltd", "limi"})
+                for variant in entity_variants:
+                    pair = f"{brand}{variant}"
+                    if len(pair) >= 8 and pair in compact_text:
+                        return True
+
+        if len(distinctive) >= 2:
+            compact_distinctive = "".join(distinctive)
+            if (
+                len(compact_distinctive) >= 8
+                and compact_distinctive in compact_text
+                and set(distinctive) & BROKER_BRAND_TOKENS
+            ):
                     return True
 
         return False

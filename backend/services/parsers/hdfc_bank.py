@@ -38,6 +38,16 @@ class HDFCBankParser(BaseParser):
         for table in tables:
             rows = self._table_rows(table["data"])
             for row in rows:
+                if not self._date_from_cell(row[0], re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}")):
+                    continuation = self._clean_text(row[1])
+                    if continuation and transactions:
+                        transactions[-1]["description"] = f"{transactions[-1]['description']} {continuation}"
+                        transactions[-1]["party_name"] = (
+                            self._extract_party_hdfc(transactions[-1]["description"])
+                            or self._extract_party_from_description(transactions[-1]["description"])
+                            or transactions[-1]["description"]
+                        )
+                    continue
                 if self.SUMMARY_PATTERN.search(" ".join(str(c or "") for c in row)):
                     continue
                 tx = self._extract_row(row, previous_balance)
@@ -75,10 +85,15 @@ class HDFCBankParser(BaseParser):
         deposits = self._split_lines(row[5])
         balances = self._split_lines(row[6])
 
+        leading_continuations = []
+        if narrations and not self._is_transaction_start(narrations[0]) and len(narrations) > len(refs):
+            leading_continuations.append(narrations.pop(0))
+
         row_count = max(len(dates), len(refs), len(value_dates), len(balances), len(narrations))
-        expanded = []
+        expanded = [["", continuation, "", "", "", "", ""] for continuation in leading_continuations]
         withdrawal_i = 0
         deposit_i = 0
+        first_amount_type = self._infer_first_amount_type(balances, withdrawals, deposits)
 
         for i in range(row_count):
             balance = self._parse_amount_cell(balances[i]) if i < len(balances) else None
@@ -95,21 +110,12 @@ class HDFCBankParser(BaseParser):
                     deposit = deposits[deposit_i]
                     deposit_i += 1
             elif i == 0:
-                next_balance = self._parse_amount_cell(balances[i + 1]) if i + 1 < len(balances) else None
-                if balance is not None and next_balance is not None:
-                    next_delta = round(next_balance - balance, 2)
-                    if next_delta < 0 and deposits:
-                        deposit = deposits[deposit_i]
-                        deposit_i += 1
-                    elif next_delta > 0 and withdrawals:
-                        withdrawal = withdrawals[withdrawal_i]
-                        withdrawal_i += 1
-                elif deposits:
-                    deposit = deposits[deposit_i]
-                    deposit_i += 1
-                elif withdrawals:
+                if first_amount_type == "withdrawal" and withdrawal_i < len(withdrawals):
                     withdrawal = withdrawals[withdrawal_i]
                     withdrawal_i += 1
+                elif first_amount_type == "deposit" and deposit_i < len(deposits):
+                    deposit = deposits[deposit_i]
+                    deposit_i += 1
 
             expanded.append([
                 dates[i] if i < len(dates) else "",
@@ -123,11 +129,56 @@ class HDFCBankParser(BaseParser):
 
         return expanded
 
+    def _infer_first_amount_type(self, balances: List[str], withdrawals: List[str], deposits: List[str]) -> Optional[str]:
+        if not balances:
+            return None
+
+        expected_withdrawals = 0
+        expected_deposits = 0
+        parsed_balances = [self._parse_amount_cell(balance) for balance in balances]
+        for i in range(1, len(parsed_balances)):
+            if parsed_balances[i] is None or parsed_balances[i - 1] is None:
+                continue
+            delta = round(parsed_balances[i] - parsed_balances[i - 1], 2)
+            if delta < 0:
+                expected_withdrawals += 1
+            elif delta > 0:
+                expected_deposits += 1
+
+        remaining_withdrawals = len(withdrawals) - expected_withdrawals
+        remaining_deposits = len(deposits) - expected_deposits
+        if remaining_withdrawals == 1 and remaining_deposits <= 0:
+            return "withdrawal"
+        if remaining_deposits == 1 and remaining_withdrawals <= 0:
+            return "deposit"
+        return None
+
     @staticmethod
     def _split_lines(cell: Optional[str]) -> List[str]:
         if not cell:
             return []
         return [line.strip() for line in str(cell).splitlines() if line and line.strip()]
+
+    @staticmethod
+    def _is_transaction_start(text: str) -> bool:
+        if re.search(
+            r"^(?:UPI-|NEFT\s*DR-|NEFTDR-|RTGS-|IMPS-|CASH\s*DEPOSIT|CASHDEPOSIT|"
+            r"POS\d+|OTHPOS\d+|IBBILLPAY|ACH|ATW-|ATM|CHQ\s+PAID)",
+            text,
+            re.IGNORECASE,
+        ):
+            return True
+
+        compact = text.strip()
+        if not re.match(r"^[A-Z][A-Z0-9 .&]*(?:LIMI|LTD|SECURITIES|BROKING|CAPITAL|WEALTH|MARKETS)-[A-Z0-9]", compact):
+            return False
+
+        prefix = compact.split("-", 1)[0]
+        prefix_tokens = set(re.findall(r"[A-Z]+", prefix.upper()))
+        bank_tokens = {"BANK", "HDFC", "HDFCBANK", "DFCBANK", "ICICI", "KICICI", "SBI", "AXIS", "KOTAK"}
+        if prefix_tokens & bank_tokens:
+            return False
+        return True
 
     def _split_narrations(self, narration_cell: Optional[str], ref_cell: Optional[str]) -> List[str]:
         lines = self._split_lines(narration_cell)
@@ -149,18 +200,13 @@ class HDFCBankParser(BaseParser):
 
         if current:
             narrations.append(" ".join(current))
-        if len(narrations) >= max(1, len(refs) // 2):
+        if len(narrations) == len(refs) and all(self._is_transaction_start(n) for n in narrations):
             return narrations
 
         narrations = []
         current = []
-        start_pattern = re.compile(
-            r"^(?:UPI-|NEFT\s*DR-|NEFTDR-|RTGS-|IMPS-|CASH\s*DEPOSIT|CASHDEPOSIT|"
-            r"POS\d+|OTHPOS\d+|IBBILLPAY|ACH|ATW-|ATM|CHQ\s+PAID)",
-            re.IGNORECASE,
-        )
         for line in lines:
-            if current and start_pattern.search(line):
+            if current and self._is_transaction_start(line):
                 narrations.append(" ".join(current))
                 current = [line]
             else:
@@ -214,12 +260,18 @@ class HDFCBankParser(BaseParser):
             if candidate and not cls._looks_like_bank_segment(candidate):
                 return cls._clean_party_candidate(candidate)
 
+        m = re.search(r"\bCASH\s*DEPOSIT(?:BY)?-", desc, re.IGNORECASE)
+        if m:
+            return "Cash Deposit"
+
+        m = re.search(r"^([A-Z][A-Z0-9 .&]{2,})-[A-Z0-9]", desc)
+        if m:
+            candidate = m.group(1).strip()
+            if candidate and not cls._looks_like_bank_segment(candidate):
+                return cls._clean_party_candidate(candidate)
+
         m = re.search(r"\b(?:POS|OTHPOS)\d+\s*([A-Za-z][A-Za-z0-9 .&-]+)", desc, re.IGNORECASE)
         if m:
             return cls._clean_party_candidate(m.group(1))
-
-        m = re.search(r"\bCASH\s*DEPOSIT-([^-\s]+-)?([A-Za-z ]+)", desc, re.IGNORECASE)
-        if m:
-            return "Cash Deposit"
 
         return ""

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from backend.database import get_db
@@ -12,8 +13,43 @@ from backend.services.audit_service import AuditService
 import os
 import shutil
 import json
+import time
+from threading import Lock
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
+
+_progress_lock = Lock()
+_parse_progress = {}
+
+def _set_parse_progress(progress_id: Optional[str], percent: int, message: str, stage: str = "processing", **extra):
+    if not progress_id:
+        return
+    payload = {
+        "id": progress_id,
+        "percent": max(0, min(100, int(percent))),
+        "message": message,
+        "stage": stage,
+        "updated_at": time.time(),
+        **extra,
+    }
+    with _progress_lock:
+        _parse_progress[progress_id] = payload
+
+def _get_parse_progress(progress_id: str):
+    with _progress_lock:
+        return _parse_progress.get(progress_id)
+
+@router.get("/parse-progress/{progress_id}")
+def get_parse_progress(progress_id: str):
+    progress = _get_parse_progress(progress_id)
+    if not progress:
+        return {
+            "id": progress_id,
+            "percent": 0,
+            "message": "Waiting to start...",
+            "stage": "queued",
+        }
+    return progress
 
 @router.get("/parsers")
 def list_parsers():
@@ -37,24 +73,30 @@ async def parse_files(
     ap_codes: Optional[str] = Form(None),
     bank_profile_id: Optional[int] = Form(None),
     bank_name: Optional[str] = Form(None),
+    progress_id: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     """Parse one or more PDFs and client list, create session, and auto-tag transactions."""
-    upload_dir = "uploads"
+    _set_parse_progress(progress_id, 1, "Preparing files...", "preparing")
+    upload_dir = os.path.abspath("uploads")
     os.makedirs(upload_dir, exist_ok=True)
     
     # Save client list
     client_list_path = os.path.join(upload_dir, client_list.filename)
     with open(client_list_path, "wb") as f:
         shutil.copyfileobj(client_list.file, f)
+    client_list_path = os.path.abspath(client_list_path)
+    _set_parse_progress(progress_id, 5, "Reading client list...", "client_list")
     
     # Parse client list (CSV or Excel)
     csv_service = CSVService()
-    clients = csv_service.parse_client_list(
+    clients = await run_in_threadpool(
+        csv_service.parse_client_list,
         client_list_path,
-        sheet_name=sheet_name,
-        name_column=name_column
+        sheet_name,
+        name_column
     )
+    _set_parse_progress(progress_id, 12, f"Loaded {len(clients)} clients.", "client_list")
     
     # Filter out excluded brokers if provided
     if excluded_brokers:
@@ -91,16 +133,83 @@ async def parse_files(
     page_offset = 0
     
     for pdf_file in pdf:
+        file_index = len(pdf_paths) + 1
         pdf_path = os.path.join(upload_dir, pdf_file.filename)
+        _set_parse_progress(
+            progress_id,
+            12 + int((file_index - 1) / max(len(pdf), 1) * 48),
+            f"Saving PDF {file_index} of {len(pdf)}: {pdf_file.filename}",
+            "saving_pdf",
+            current_file=file_index,
+            total_files=len(pdf),
+        )
         with open(pdf_path, "wb") as f:
             shutil.copyfileobj(pdf_file.file, f)
         pdf_paths.append(pdf_path)
-        txns = pdf_service.parse_transactions(pdf_path, password, bank_name=bank_name)
+        _set_parse_progress(
+            progress_id,
+            15 + int((file_index - 1) / max(len(pdf), 1) * 45),
+            f"Parsing PDF {file_index} of {len(pdf)}: {pdf_file.filename}",
+            "parsing_pdf",
+            current_file=file_index,
+            total_files=len(pdf),
+        )
+        def report_pdf_progress(phase: str, done: int, total: int):
+            phase_weight = 0.5 if phase == "tables" else 1.0
+            page_fraction = 0 if total == 0 else (done / total) * phase_weight
+            if phase == "text":
+                page_fraction = 0.5 + (0 if total == 0 else (done / total) * 0.5)
+            pdf_fraction = ((file_index - 1) + page_fraction) / max(len(pdf), 1)
+            percent = 15 + int(pdf_fraction * 45)
+            label = "Extracting tables" if phase == "tables" else "Reading text"
+            _set_parse_progress(
+                progress_id,
+                percent,
+                f"{label} from PDF {file_index} of {len(pdf)}: page {done} of {total}",
+                "parsing_pdf",
+                current_file=file_index,
+                total_files=len(pdf),
+                current_page=done,
+                total_pages=total,
+            )
+
+        txns = await run_in_threadpool(pdf_service.parse_transactions, pdf_path, password, bank_name, report_pdf_progress)
         for tx in txns:
             if tx.get("page_number"):
                 tx["page_number"] += page_offset
+            tx["pdf_filename"] = pdf_file.filename
+            # Detect payment method from description
+            desc = (tx.get("description") or "") + " " + (tx.get("party_name") or "")
+            methods = {
+                "NEFT": r'\bNEFT\b',
+                "RTGS": r'\bRTGS\b',
+                "IMPS": r'\bIMPS\b',
+                "UPI": r'\bUPI\b',
+                "CASH": r'\bCASH\b',
+                "CHEQUE": r'\bCHEQUE\b|\bCHQ\b|\bCH\.?\b',
+                "ECS": r'\bECS\b',
+                "ATM": r'\bATM\b',
+                "POS": r'\bPOS\b',
+                "SWIFT": r'\bSWIFT\b',
+            }
+            import re
+            detected = "OTHER"
+            for method, pattern in methods.items():
+                if re.search(pattern, desc, re.IGNORECASE):
+                    detected = method
+                    break
+            tx["payment_method"] = detected
         all_transactions.extend(txns)
-        page_offset += pdf_service.get_page_count(pdf_path, password)
+        page_offset += await run_in_threadpool(pdf_service.get_page_count, pdf_path, password)
+        _set_parse_progress(
+            progress_id,
+            15 + int(file_index / max(len(pdf), 1) * 45),
+            f"Parsed PDF {file_index} of {len(pdf)} ({len(all_transactions)} transactions found).",
+            "parsing_pdf",
+            current_file=file_index,
+            total_files=len(pdf),
+            transactions_found=len(all_transactions),
+        )
     
     # Create session
     session_service = SessionService(db)
@@ -114,13 +223,27 @@ async def parse_files(
         csv_path=client_list_path,
         settings_snapshot=settings
     )
+    _set_parse_progress(progress_id, 65, f"Saving {len(all_transactions)} transactions...", "saving_transactions")
     
     # Add transactions
     transactions = session_service.add_transactions(session.id, all_transactions)
+    _set_parse_progress(progress_id, 72, "Tagging transactions...", "tagging", transactions_found=len(transactions))
     
     # Auto-tag (pass session settings so per-session threshold is used)
     tagging = TaggingService(db)
-    tags = tagging.auto_tag_session(session.id, clients, session_settings=settings)
+    def report_tagging(done: int, total: int):
+        pct = 72 if total == 0 else 72 + int((done / total) * 23)
+        _set_parse_progress(
+            progress_id,
+            pct,
+            f"Tagging transactions {done} of {total}...",
+            "tagging",
+            transactions_tagged=done,
+            transaction_count=total,
+        )
+
+    tags = tagging.auto_tag_session(session.id, clients, session_settings=settings, progress_callback=report_tagging)
+    _set_parse_progress(progress_id, 96, "Writing audit log...", "finalizing")
     
     # Log
     audit = AuditService(db)
@@ -128,6 +251,15 @@ async def parse_files(
               old_value=None, 
               new_value={"transaction_count": len(transactions), "tag_count": len(tags)},
               session_id=session.id, is_auto=True)
+    _set_parse_progress(
+        progress_id,
+        100,
+        f"Audit ready: {len(transactions)} transactions, {len(tags)} tags.",
+        "complete",
+        session_id=session.id,
+        transaction_count=len(transactions),
+        tag_count=len(tags),
+    )
     
     return {
         "session_id": session.id,
@@ -140,3 +272,42 @@ async def parse_files(
 def get_tag_summary(session_id: int, db: Session = Depends(get_db)):
     tagging = TaggingService(db)
     return tagging.get_tag_summary(session_id)
+
+@router.post("/{transaction_id}/review")
+def update_review_status(
+    transaction_id: int,
+    status: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Update review status: unreviewed, reviewed, needs_review, flagged"""
+    service = SessionService(db)
+    tx = service.update_transaction(transaction_id, review_status=status)
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return {"success": True, "review_status": status}
+
+@router.post("/{transaction_id}/notes")
+def update_transaction_notes(
+    transaction_id: int,
+    notes: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Add or update user notes on a transaction"""
+    service = SessionService(db)
+    tx = service.update_transaction(transaction_id, user_notes=notes)
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return {"success": True, "user_notes": notes}
+
+@router.post("/{transaction_id}/exported")
+def mark_transaction_exported(
+    transaction_id: int,
+    db: Session = Depends(get_db)
+):
+    """Mark a transaction as exported"""
+    from datetime import datetime
+    service = SessionService(db)
+    tx = service.update_transaction(transaction_id, exported_at=datetime.utcnow())
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return {"success": True, "exported_at": tx.exported_at}

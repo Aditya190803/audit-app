@@ -69,7 +69,9 @@ class SessionService:
                 party_name=data.get("party_name"),
                 raw_text=data.get("raw_text"),
                 page_number=data.get("page_number"),
-                bounding_box_json=data.get("bounding_box_json")
+                bounding_box_json=data.get("bounding_box_json"),
+                payment_method=data.get("payment_method"),
+                pdf_filename=data.get("pdf_filename"),
             )
             self.db.add(tx)
             transactions.append(tx)
@@ -115,3 +117,12 @@ class SessionService:
         if session:
             session.status = status
             self.db.commit()
+
+    def update_transaction(self, transaction_id: int, **kwargs) -> Optional[Transaction]:
+        tx = self.get_transaction(transaction_id)
+        if tx:
+            for key, value in kwargs.items():
+                setattr(tx, key, value)
+            self.db.commit()
+            self.db.refresh(tx)
+        return tx

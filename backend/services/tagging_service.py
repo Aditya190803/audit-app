@@ -3,7 +3,7 @@ from backend.models import Transaction, Tag, Broker, Alias, AuditSession
 from backend.services.fuzzy_service import FuzzyService
 from backend.services.config_service import ConfigService
 from backend.services.parsers.base import BaseParser
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
 from collections import defaultdict
 import re
 from datetime import datetime
@@ -112,7 +112,8 @@ class TaggingService:
         return True
     
     def auto_tag_session(self, session_id: int, clients: List[Dict[str, Any]],
-                         session_settings: Dict[str, Any] = None) -> List[Tag]:
+                         session_settings: Dict[str, Any] = None,
+                         progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Tag]:
         """Auto-tag all transactions in a session.
         
         Args:
@@ -157,7 +158,8 @@ class TaggingService:
         # Detect recurring transactions
         recurring_map = self._detect_recurring(transactions, recurring_window)
         
-        for tx in transactions:
+        total_transactions = len(transactions)
+        for i, tx in enumerate(transactions, 1):
             party_text = tx.party_name or ""
             desc_text = tx.description or ""
             full_text = f"{party_text} {desc_text}"
@@ -286,6 +288,9 @@ class TaggingService:
                     )
                     new_tags.append(tag)
                     self.db.add(tag)
+
+            if progress_callback and (i == total_transactions or i % 25 == 0):
+                progress_callback(i, total_transactions)
         
         self.db.commit()
         
