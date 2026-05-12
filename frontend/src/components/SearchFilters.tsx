@@ -1,13 +1,26 @@
-import React, { useState, useRef, useEffect } from 'react'
-import { Filter, Search, X, ChevronDown, ChevronUp, IndianRupee, Calendar, Users, FileText, Save, Bookmark } from 'lucide-react'
+import React, { useMemo } from 'react'
+import { Filter, Search, X, ChevronDown, ChevronUp, IndianRupee, Calendar, Users, FileText, LayoutList, Building2, AlertTriangle } from 'lucide-react'
 import { type AdvancedFilters, type AmountDirection, type AmountType, type TagSourceFilter, type TagConfidenceFilter, type ClientActivityType, type ExceptionFilter } from '../utils/auditAnalytics'
+import { getFilterVisibility } from '../utils/filterConfig'
+
+type ResultFilter = 'all' | 'client' | 'broker' | 'suspicious'
+
+const RESULT_FILTER_META: { key: ResultFilter; label: string; icon: React.ReactNode; colorVar: string; bgVar: string }[] = [
+  { key: 'all', label: 'All', icon: <LayoutList className="h-3.5 w-3.5" strokeWidth={2} />, colorVar: 'var(--text-primary)', bgVar: 'var(--surface-hover)' },
+  { key: 'client', label: 'Client', icon: <Users className="h-3.5 w-3.5" strokeWidth={2} />, colorVar: 'var(--success)', bgVar: 'var(--success-subtle)' },
+  { key: 'broker', label: 'Broker', icon: <Building2 className="h-3.5 w-3.5" strokeWidth={2} />, colorVar: 'var(--warning)', bgVar: 'var(--warning-subtle)' },
+  { key: 'suspicious', label: 'Suspicious', icon: <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2} />, colorVar: 'var(--danger)', bgVar: 'var(--danger-subtle)' },
+]
 
 interface SearchFiltersProps {
   searchQuery: string
   filterTags: string[]
   advancedFilters: AdvancedFilters
   filtersExpanded: boolean
+  resultFilter: ResultFilter
+  filterCounts: Record<ResultFilter, number>
   clientOptions: { key: string; name: string; count: number }[]
+  brokerOptions: { key: string; name: string; count: number }[]
   partyOptions: { key: string; name: string; count: number }[]
   pdfOptions: { key: string; name: string; count: number }[]
   activeFilterCount: number
@@ -16,6 +29,7 @@ interface SearchFiltersProps {
   onClearFilters: () => void
   onToggleFiltersExpanded: () => void
   onRemoveFilterTag: (tag: string) => void
+  onResultFilterChange: (filter: ResultFilter) => void
 }
 
 const FINANCIAL_YEARS = [
@@ -74,7 +88,10 @@ export const SearchFilters: React.FC<SearchFiltersProps> = ({
   filterTags,
   advancedFilters,
   filtersExpanded,
+  resultFilter,
+  filterCounts,
   clientOptions,
+  brokerOptions,
   partyOptions,
   pdfOptions,
   activeFilterCount,
@@ -83,123 +100,112 @@ export const SearchFilters: React.FC<SearchFiltersProps> = ({
   onClearFilters,
   onToggleFiltersExpanded,
   onRemoveFilterTag,
+  onResultFilterChange,
 }) => {
-  const [presets, setPresets] = useState<Record<string, Partial<AdvancedFilters>>>(() => {
-    try { return JSON.parse(localStorage.getItem('filter_presets') || '{}') } catch { return {} }
-  })
-  const [presetOpen, setPresetOpen] = useState(false)
-  const [presetName, setPresetName] = useState('')
-  const presetRef = useRef<HTMLDivElement>(null)
+  const vis = getFilterVisibility(resultFilter)
   const hasFilters = activeFilterCount > 0
 
-  const savePreset = () => {
-    const name = presetName.trim()
-    if (!name) return
-    const next = { ...presets, [name]: { ...advancedFilters } }
-    setPresets(next)
-    localStorage.setItem('filter_presets', JSON.stringify(next))
-    setPresetName('')
-    setPresetOpen(false)
-  }
-
-  const loadPreset = (name: string) => {
-    const preset = presets[name]
-    if (!preset) return
-    const entries = Object.entries(preset) as [keyof AdvancedFilters, unknown][]
-    for (const [key, value] of entries) {
-      onAdvancedFilterChange(key, value as AdvancedFilters[keyof AdvancedFilters])
-    }
-    setPresetOpen(false)
-  }
-
-  const deletePreset = (name: string) => {
-    const next = { ...presets }
-    delete next[name]
-    setPresets(next)
-    localStorage.setItem('filter_presets', JSON.stringify(next))
-  }
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (presetRef.current && !presetRef.current.contains(e.target as Node)) {
-        setPresetOpen(false)
-      }
-    }
-    if (presetOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-      return () => document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [presetOpen])
-
   /* ── Build active-filter chip list ──────────────────────────── */
-  const activeChips: { label: string; onRemove: () => void }[] = []
+  const activeChips = useMemo(() => {
+    const chips: { label: string; onRemove: () => void }[] = []
 
-  if (searchQuery) {
-    activeChips.push({ label: `"${searchQuery}"`, onRemove: () => onSearchChange('') })
-  }
-  for (const tag of filterTags) {
-    activeChips.push({ label: `Tag: ${tag}`, onRemove: () => onRemoveFilterTag(tag) })
-  }
-  if (advancedFilters.clientName) {
-    const client = clientOptions.find((c) => c.key === advancedFilters.clientName)
-    activeChips.push({ label: `Client: ${client?.name || advancedFilters.clientName}`, onRemove: () => onAdvancedFilterChange('clientName', '') })
-  }
-  if (advancedFilters.partyName) {
-    const party = partyOptions.find((p) => p.key === advancedFilters.partyName)
-    activeChips.push({ label: `Party: ${party?.name || advancedFilters.partyName}`, onRemove: () => onAdvancedFilterChange('partyName', '') })
-  }
-  if (advancedFilters.amountDirection !== 'all') {
-    activeChips.push({ label: `${advancedFilters.amountDirection} only`, onRemove: () => onAdvancedFilterChange('amountDirection', 'all' as AmountDirection) })
-  }
-  if (advancedFilters.amountType !== 'all') {
-    activeChips.push({ label: advancedFilters.amountType === 'high_value' ? 'High value' : 'Round amounts', onRemove: () => onAdvancedFilterChange('amountType', 'all' as AmountType) })
-  }
-  if (advancedFilters.dateFrom) {
-    activeChips.push({ label: `From: ${advancedFilters.dateFrom}`, onRemove: () => onAdvancedFilterChange('dateFrom', '') })
-  }
-  if (advancedFilters.dateTo) {
-    activeChips.push({ label: `To: ${advancedFilters.dateTo}`, onRemove: () => onAdvancedFilterChange('dateTo', '') })
-  }
-  if (advancedFilters.minAmountAbs) {
-    activeChips.push({ label: `Min: ₹${advancedFilters.minAmountAbs}`, onRemove: () => onAdvancedFilterChange('minAmountAbs', '') })
-  }
-  if (advancedFilters.maxAmountAbs) {
-    activeChips.push({ label: `Max: ₹${advancedFilters.maxAmountAbs}`, onRemove: () => onAdvancedFilterChange('maxAmountAbs', '') })
-  }
-  if (advancedFilters.exception !== 'none') {
-    activeChips.push({ label: advancedFilters.exception.replace(/_/g, ' '), onRemove: () => onAdvancedFilterChange('exception', 'none') })
-  }
-  if (advancedFilters.financialYear) {
-    activeChips.push({ label: `FY ${advancedFilters.financialYear}`, onRemove: () => onAdvancedFilterChange('financialYear', '') })
-  }
-  if (advancedFilters.month) {
-    activeChips.push({ label: monthLabel(advancedFilters.month), onRemove: () => onAdvancedFilterChange('month', '') })
-  }
-  if (advancedFilters.weekend) {
-    activeChips.push({ label: 'Weekend', onRemove: () => onAdvancedFilterChange('weekend', false) })
-  }
-  if (advancedFilters.paymentMethod) {
-    activeChips.push({ label: advancedFilters.paymentMethod, onRemove: () => onAdvancedFilterChange('paymentMethod', '') })
-  }
-  if (advancedFilters.tagSource !== 'all') {
-    activeChips.push({ label: `${advancedFilters.tagSource} tags`, onRemove: () => onAdvancedFilterChange('tagSource', 'all' as TagSourceFilter) })
-  }
-  if (advancedFilters.tagConfidence !== 'all') {
-    activeChips.push({ label: `${advancedFilters.tagConfidence} confidence`, onRemove: () => onAdvancedFilterChange('tagConfidence', 'all' as TagConfidenceFilter) })
-  }
-  if (advancedFilters.clientActivityType !== 'all') {
-    activeChips.push({ label: advancedFilters.clientActivityType.replace(/_/g, ' '), onRemove: () => onAdvancedFilterChange('clientActivityType', 'all' as ClientActivityType) })
-  }
-  if (advancedFilters.pdfFile) {
-    const pdf = pdfOptions.find((p) => p.key === advancedFilters.pdfFile)
-    activeChips.push({ label: `PDF: ${pdf?.name || advancedFilters.pdfFile}`, onRemove: () => onAdvancedFilterChange('pdfFile', '') })
-  }
+    if (searchQuery) {
+      chips.push({ label: `"${searchQuery}"`, onRemove: () => onSearchChange('') })
+    }
+    for (const tag of filterTags) {
+      chips.push({ label: `Tag: ${tag}`, onRemove: () => onRemoveFilterTag(tag) })
+    }
+    if (advancedFilters.clientName) {
+      const client = clientOptions.find((c) => c.key === advancedFilters.clientName)
+      chips.push({ label: `Client: ${client?.name || advancedFilters.clientName}`, onRemove: () => onAdvancedFilterChange('clientName', '') })
+    }
+    if (advancedFilters.brokerName) {
+      const broker = brokerOptions.find((b) => b.key === advancedFilters.brokerName)
+      chips.push({ label: `Broker: ${broker?.name || advancedFilters.brokerName}`, onRemove: () => onAdvancedFilterChange('brokerName', '') })
+    }
+    if (advancedFilters.partyName) {
+      const party = partyOptions.find((p) => p.key === advancedFilters.partyName)
+      chips.push({ label: `Party: ${party?.name || advancedFilters.partyName}`, onRemove: () => onAdvancedFilterChange('partyName', '') })
+    }
+    if (advancedFilters.amountDirection !== 'all') {
+      chips.push({ label: `${advancedFilters.amountDirection} only`, onRemove: () => onAdvancedFilterChange('amountDirection', 'all' as AmountDirection) })
+    }
+    if (advancedFilters.amountType !== 'all') {
+      chips.push({ label: advancedFilters.amountType === 'high_value' ? 'High value' : 'Round amounts', onRemove: () => onAdvancedFilterChange('amountType', 'all' as AmountType) })
+    }
+    if (advancedFilters.dateFrom) {
+      chips.push({ label: `From: ${advancedFilters.dateFrom}`, onRemove: () => onAdvancedFilterChange('dateFrom', '') })
+    }
+    if (advancedFilters.dateTo) {
+      chips.push({ label: `To: ${advancedFilters.dateTo}`, onRemove: () => onAdvancedFilterChange('dateTo', '') })
+    }
+    if (advancedFilters.minAmountAbs) {
+      chips.push({ label: `Min: ₹${advancedFilters.minAmountAbs}`, onRemove: () => onAdvancedFilterChange('minAmountAbs', '') })
+    }
+    if (advancedFilters.maxAmountAbs) {
+      chips.push({ label: `Max: ₹${advancedFilters.maxAmountAbs}`, onRemove: () => onAdvancedFilterChange('maxAmountAbs', '') })
+    }
+    if (advancedFilters.exception !== 'none') {
+      chips.push({ label: advancedFilters.exception.replace(/_/g, ' '), onRemove: () => onAdvancedFilterChange('exception', 'none') })
+    }
+    if (advancedFilters.financialYear) {
+      chips.push({ label: `FY ${advancedFilters.financialYear}`, onRemove: () => onAdvancedFilterChange('financialYear', '') })
+    }
+    if (advancedFilters.month) {
+      chips.push({ label: monthLabel(advancedFilters.month), onRemove: () => onAdvancedFilterChange('month', '') })
+    }
+    if (advancedFilters.weekend) {
+      chips.push({ label: 'Weekend', onRemove: () => onAdvancedFilterChange('weekend', false) })
+    }
+    if (advancedFilters.paymentMethod) {
+      chips.push({ label: advancedFilters.paymentMethod, onRemove: () => onAdvancedFilterChange('paymentMethod', '') })
+    }
+    if (advancedFilters.tagSource !== 'all') {
+      chips.push({ label: `${advancedFilters.tagSource} tags`, onRemove: () => onAdvancedFilterChange('tagSource', 'all' as TagSourceFilter) })
+    }
+    if (advancedFilters.tagConfidence !== 'all') {
+      chips.push({ label: `${advancedFilters.tagConfidence} confidence`, onRemove: () => onAdvancedFilterChange('tagConfidence', 'all' as TagConfidenceFilter) })
+    }
+    if (advancedFilters.clientActivityType !== 'all') {
+      chips.push({ label: advancedFilters.clientActivityType.replace(/_/g, ' '), onRemove: () => onAdvancedFilterChange('clientActivityType', 'all' as ClientActivityType) })
+    }
+    if (advancedFilters.pdfFile) {
+      const pdf = pdfOptions.find((p) => p.key === advancedFilters.pdfFile)
+      chips.push({ label: `PDF: ${pdf?.name || advancedFilters.pdfFile}`, onRemove: () => onAdvancedFilterChange('pdfFile', '') })
+    }
+
+    return chips
+  }, [searchQuery, filterTags, advancedFilters, clientOptions, brokerOptions, partyOptions, pdfOptions, onSearchChange, onRemoveFilterTag, onAdvancedFilterChange])
 
   return (
     <div className="border-b border-[var(--border)] bg-[var(--surface)]">
-      {/* ── Search bar row ────────────────────────────────────── */}
-      <div className="px-3 py-2.5 flex items-center gap-3">
-        <div className="relative flex-1 min-w-[220px] max-w-sm">
+      {/* ── Category tabs + Search bar row ─────────────────── */}
+      <div className="px-3 py-2.5 flex items-center gap-2">
+        {/* Category tabs */}
+        <div className="flex items-center bg-[var(--bg)] rounded-[var(--radius-md)] p-0.5 gap-0.5 shrink-0">
+          {RESULT_FILTER_META.map((meta) => {
+            const isActive = resultFilter === meta.key
+            const count = filterCounts[meta.key]
+            return (
+              <button
+                key={meta.key}
+                onClick={() => onResultFilterChange(meta.key)}
+                className={`flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-sm)] transition-colors duration-150 ${
+                  isActive ? 'bg-white shadow-[var(--shadow-sm)]' : 'hover:bg-[var(--surface-hover)]'
+                }`}
+                style={isActive ? { color: meta.colorVar } : { color: 'var(--text-secondary)' }}
+              >
+                {meta.icon}
+                {meta.label}
+                <span className="text-[9px] opacity-60 font-mono">{count}</span>
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="w-px h-5 bg-[var(--border)]" />
+
+        <div className="relative flex-1 min-w-[180px] max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-tertiary)]" strokeWidth={1.5} />
           <input
             type="text"
@@ -210,31 +216,49 @@ export const SearchFilters: React.FC<SearchFiltersProps> = ({
           />
         </div>
 
-        <select
-          value={advancedFilters.clientName}
-          onChange={(e) => onAdvancedFilterChange('clientName', e.target.value)}
-          className="filter-control max-w-[220px] flex-none"
-        >
-          <option value="">All clients</option>
-          {clientOptions.map((client) => (
-            <option key={client.key} value={client.key}>{client.name} ({client.count})</option>
-          ))}
-        </select>
+        {/* Inline dropdown 1: Client or Broker name */}
+        {vis.clientName && (
+          <select
+            value={advancedFilters.clientName}
+            onChange={(e) => onAdvancedFilterChange('clientName', e.target.value)}
+            className="filter-control max-w-[200px] flex-none"
+          >
+            <option value="">All clients</option>
+            {clientOptions.map((c) => (
+              <option key={c.key} value={c.key}>{c.name} ({c.count})</option>
+            ))}
+          </select>
+        )}
+        {vis.brokerName && (
+          <select
+            value={advancedFilters.brokerName}
+            onChange={(e) => onAdvancedFilterChange('brokerName', e.target.value)}
+            className="filter-control max-w-[200px] flex-none"
+          >
+            <option value="">All brokers</option>
+            {brokerOptions.map((b) => (
+              <option key={b.key} value={b.key}>{b.name} ({b.count})</option>
+            ))}
+          </select>
+        )}
 
-        <select
-          value={advancedFilters.exception}
-          onChange={(e) => onAdvancedFilterChange('exception', e.target.value as ExceptionFilter)}
-          className="filter-control max-w-[180px] flex-none"
-        >
-          <option value="none">All review states</option>
-          <option value="untagged">Untagged</option>
-          <option value="repeat">Repeat parties</option>
-          <option value="high_value">High value</option>
-          <option value="low_confidence">Low confidence</option>
-          <option value="missing_party">Missing party</option>
-          <option value="cash">Cash</option>
-          <option value="same_day">Same-day repeats</option>
-        </select>
+        {/* Inline dropdown 2: Exception or other */}
+        {vis.exception && (
+          <select
+            value={advancedFilters.exception}
+            onChange={(e) => onAdvancedFilterChange('exception', e.target.value as ExceptionFilter)}
+            className="filter-control max-w-[170px] flex-none"
+          >
+            <option value="none">Review state</option>
+            <option value="untagged">Untagged</option>
+            <option value="repeat">Repeat parties</option>
+            <option value="high_value">High value</option>
+            <option value="low_confidence">Low confidence</option>
+            <option value="missing_party">Missing party</option>
+            <option value="cash">Cash</option>
+            <option value="same_day">Same-day repeats</option>
+          </select>
+        )}
 
         <button
           onClick={onToggleFiltersExpanded}
@@ -261,63 +285,6 @@ export const SearchFilters: React.FC<SearchFiltersProps> = ({
           </button>
         )}
 
-        {/* Filter presets */}
-        <div className="relative" ref={presetRef}>
-          <button
-            onClick={() => setPresetOpen((o) => !o)}
-            className="flex items-center gap-1.5 h-8 px-2.5 text-xs font-medium rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] transition-colors duration-150"
-          >
-            <Bookmark className="h-3.5 w-3.5" strokeWidth={1.5} />
-            Presets
-            {Object.keys(presets).length > 0 && (
-              <span className="ml-0.5 text-[10px] px-1 py-0.5 rounded-full bg-[var(--bg)] font-semibold">
-                {Object.keys(presets).length}
-              </span>
-            )}
-          </button>
-          {presetOpen && (
-            <div className="absolute right-0 top-full mt-1 z-30 min-w-[200px] bg-white border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-md)] overflow-hidden">
-              <div className="p-2 border-b border-[var(--border)] flex gap-1.5">
-                <input
-                  type="text"
-                  value={presetName}
-                  onChange={(e) => setPresetName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') savePreset() }}
-                  placeholder="Preset name..."
-                  className="flex-1 min-w-0 px-2 py-1 text-xs border border-[var(--border)] rounded-[var(--radius-sm)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)] placeholder:text-[var(--text-tertiary)]"
-                />
-                <button
-                  onClick={savePreset}
-                  disabled={!presetName.trim()}
-                  className="px-2 py-1 text-xs font-medium text-white bg-[var(--primary)] rounded-[var(--radius-sm)] hover:brightness-110 transition-all disabled:opacity-40"
-                >
-                  <Save className="h-3 w-3" strokeWidth={2} />
-                </button>
-              </div>
-              {Object.keys(presets).length === 0 && (
-                <div className="px-3 py-4 text-xs text-[var(--text-tertiary)] text-center">
-                  No saved presets
-                </div>
-              )}
-              {Object.entries(presets).map(([name]) => (
-                <div key={name} className="flex items-center gap-1 px-2 py-1 text-xs text-[var(--text-primary)] hover:bg-[var(--surface-hover)] group">
-                  <button
-                    onClick={() => loadPreset(name)}
-                    className="flex-1 text-left truncate"
-                  >
-                    {name}
-                  </button>
-                  <button
-                    onClick={() => deletePreset(name)}
-                    className="p-0.5 text-[var(--text-tertiary)] hover:text-[var(--danger)] opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <X className="h-3 w-3" strokeWidth={2} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
 
       {/* ── Active filter chips ────────────────────────────────── */}
@@ -341,35 +308,26 @@ export const SearchFilters: React.FC<SearchFiltersProps> = ({
       {filtersExpanded && (
         <div className="px-3 pb-3 animate-fade-in-down">
 
-          {/* ─── Section 1: Amount & Type ─────────────────────── */}
+          {/* ─── Primary Controls ──────────────────────────── */}
           <div className="border-t border-[var(--border)] pt-2.5 pb-3">
             <SectionHeader
               icon={<IndianRupee className="h-3.5 w-3.5" strokeWidth={1.5} />}
-              title="Amount & Type"
+              title="Primary Controls"
             />
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-1.5">
-              <FilterField label="Direction">
-                <select
-                  value={advancedFilters.amountDirection}
-                  onChange={(e) => onAdvancedFilterChange('amountDirection', e.target.value as AmountDirection)}
-                  className="filter-control"
-                >
-                  <option value="all">Debit & Credit</option>
-                  <option value="debit">Debit only</option>
-                  <option value="credit">Credit only</option>
-                </select>
-              </FilterField>
-              <FilterField label="Amount type">
-                <select
-                  value={advancedFilters.amountType}
-                  onChange={(e) => onAdvancedFilterChange('amountType', e.target.value as AmountType)}
-                  className="filter-control"
-                >
-                  <option value="all">All amounts</option>
-                  <option value="high_value">High value</option>
-                  <option value="round">Round amounts</option>
-                </select>
-              </FilterField>
+              {vis.direction && (
+                <FilterField label="Direction">
+                  <select
+                    value={advancedFilters.amountDirection}
+                    onChange={(e) => onAdvancedFilterChange('amountDirection', e.target.value as AmountDirection)}
+                    className="filter-control"
+                  >
+                    <option value="all">Debit & Credit</option>
+                    <option value="debit">Debit only</option>
+                    <option value="credit">Credit only</option>
+                  </select>
+                </FilterField>
+              )}
               <FilterField label="Min amount (₹)">
                 <input
                   inputMode="numeric"
@@ -388,237 +346,197 @@ export const SearchFilters: React.FC<SearchFiltersProps> = ({
                   className="filter-control"
                 />
               </FilterField>
+              {vis.dateRange && (
+                <FilterField label="From date">
+                  <input
+                    type="date"
+                    value={advancedFilters.dateFrom}
+                    onChange={(e) => onAdvancedFilterChange('dateFrom', e.target.value)}
+                    className="filter-control"
+                  />
+                </FilterField>
+              )}
+              {vis.dateRange && (
+                <FilterField label="To date">
+                  <input
+                    type="date"
+                    value={advancedFilters.dateTo}
+                    onChange={(e) => onAdvancedFilterChange('dateTo', e.target.value)}
+                    className="filter-control"
+                  />
+                </FilterField>
+              )}
             </div>
           </div>
 
-          {/* ─── Section 2: Date & Period ─────────────────────── */}
+          {/* ─── Category-Specific Controls ─────────────────── */}
+          {(vis.financialYear || vis.month || vis.weekend || vis.partyName || vis.tagSource || vis.tagConfidence || vis.paymentMethod || vis.clientActivityType) && (
           <div className="border-t border-[var(--border)] pt-2.5 pb-3">
             <SectionHeader
               icon={<Calendar className="h-3.5 w-3.5" strokeWidth={1.5} />}
-              title="Date & Period"
-            />
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-1.5">
-              <FilterField label="From date">
-                <input
-                  type="date"
-                  value={advancedFilters.dateFrom}
-                  onChange={(e) => onAdvancedFilterChange('dateFrom', e.target.value)}
-                  className="filter-control"
-                />
-              </FilterField>
-              <FilterField label="To date">
-                <input
-                  type="date"
-                  value={advancedFilters.dateTo}
-                  onChange={(e) => onAdvancedFilterChange('dateTo', e.target.value)}
-                  className="filter-control"
-                />
-              </FilterField>
-              <FilterField label="Financial year">
-                <select
-                  value={advancedFilters.financialYear}
-                  onChange={(e) => onAdvancedFilterChange('financialYear', e.target.value)}
-                  className="filter-control"
-                >
-                  <option value="">All FY</option>
-                  {FINANCIAL_YEARS.map((fy) => (
-                    <option key={fy} value={fy}>{fy}</option>
-                  ))}
-                </select>
-              </FilterField>
-              <FilterField label="Month">
-                <select
-                  value={advancedFilters.month}
-                  onChange={(e) => onAdvancedFilterChange('month', e.target.value)}
-                  className="filter-control"
-                >
-                  <option value="">All months</option>
-                  {MONTHS.map((m) => (
-                    <option key={m} value={m}>{monthLabel(m)}</option>
-                  ))}
-                </select>
-              </FilterField>
-            </div>
-            <div className="flex items-center gap-2 mt-2.5">
-              <TogglePill
-                active={advancedFilters.weekend}
-                onClick={() => onAdvancedFilterChange('weekend', !advancedFilters.weekend)}
-              >
-                Weekend only
-              </TogglePill>
-            </div>
-          </div>
-
-          {/* ─── Section 3: Party & Source ─────────────────────── */}
-          <div className="border-t border-[var(--border)] pt-2.5 pb-3">
-            <SectionHeader
-              icon={<Users className="h-3.5 w-3.5" strokeWidth={1.5} />}
-              title="Party & Source"
+              title="Category-Specific"
             />
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 mt-1.5">
-              <FilterField label="Party">
-                <select
-                  value={advancedFilters.partyName}
-                  onChange={(e) => onAdvancedFilterChange('partyName', e.target.value)}
-                  className="filter-control"
-                >
-                  <option value="">All parties</option>
-                  {partyOptions.slice(0, 250).map((party) => (
-                    <option key={party.key} value={party.key}>{party.name} ({party.count})</option>
-                  ))}
-                </select>
-              </FilterField>
-              <FilterField label="Tag source">
-                <select
-                  value={advancedFilters.tagSource}
-                  onChange={(e) => onAdvancedFilterChange('tagSource', e.target.value as TagSourceFilter)}
-                  className="filter-control"
-                >
-                  <option value="all">Any source</option>
-                  <option value="manual">Manual tags</option>
-                  <option value="auto">Auto tags</option>
-                </select>
-              </FilterField>
-              <FilterField label="Confidence">
-                <select
-                  value={advancedFilters.tagConfidence}
-                  onChange={(e) => onAdvancedFilterChange('tagConfidence', e.target.value as TagConfidenceFilter)}
-                  className="filter-control"
-                >
-                  <option value="all">Any confidence</option>
-                  <option value="high">High confidence</option>
-                  <option value="low">Low confidence</option>
-                </select>
-              </FilterField>
-              <FilterField label="Payment method">
-                <select
-                  value={advancedFilters.paymentMethod}
-                  onChange={(e) => onAdvancedFilterChange('paymentMethod', e.target.value)}
-                  className="filter-control"
-                >
-                  <option value="">All methods</option>
-                  {PAYMENT_METHODS.map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-              </FilterField>
-              <FilterField label="Client activity">
-                <select
-                  value={advancedFilters.clientActivityType}
-                  onChange={(e) => onAdvancedFilterChange('clientActivityType', e.target.value as ClientActivityType)}
-                  className="filter-control"
-                >
-                  <option value="all">All activity</option>
-                  <option value="both">Debit & Credit</option>
-                  <option value="debit_only">Debit only</option>
-                  <option value="credit_only">Credit only</option>
-                </select>
-              </FilterField>
+              {vis.partyName && (
+                <FilterField label="Party">
+                  <select
+                    value={advancedFilters.partyName}
+                    onChange={(e) => onAdvancedFilterChange('partyName', e.target.value)}
+                    className="filter-control"
+                  >
+                    <option value="">All parties</option>
+                    {partyOptions.slice(0, 250).map((party) => (
+                      <option key={party.key} value={party.key}>{party.name} ({party.count})</option>
+                    ))}
+                  </select>
+                </FilterField>
+              )}
+              {vis.tagSource && (
+                <FilterField label="Tag source">
+                  <select
+                    value={advancedFilters.tagSource}
+                    onChange={(e) => onAdvancedFilterChange('tagSource', e.target.value as TagSourceFilter)}
+                    className="filter-control"
+                  >
+                    <option value="all">Any source</option>
+                    <option value="manual">Manual tags</option>
+                    <option value="auto">Auto tags</option>
+                  </select>
+                </FilterField>
+              )}
+              {vis.tagConfidence && (
+                <FilterField label="Confidence">
+                  <select
+                    value={advancedFilters.tagConfidence}
+                    onChange={(e) => onAdvancedFilterChange('tagConfidence', e.target.value as TagConfidenceFilter)}
+                    className="filter-control"
+                  >
+                    <option value="all">Any confidence</option>
+                    <option value="high">High confidence</option>
+                    <option value="low">Low confidence</option>
+                  </select>
+                </FilterField>
+              )}
+              {vis.paymentMethod && (
+                <FilterField label="Payment method">
+                  <select
+                    value={advancedFilters.paymentMethod}
+                    onChange={(e) => onAdvancedFilterChange('paymentMethod', e.target.value)}
+                    className="filter-control"
+                  >
+                    <option value="">All methods</option>
+                    {PAYMENT_METHODS.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </FilterField>
+              )}
+              {vis.clientActivityType && (
+                <FilterField label="Client activity">
+                  <select
+                    value={advancedFilters.clientActivityType}
+                    onChange={(e) => onAdvancedFilterChange('clientActivityType', e.target.value as ClientActivityType)}
+                    className="filter-control"
+                  >
+                    <option value="all">All activity</option>
+                    <option value="both">Debit & Credit</option>
+                    <option value="debit_only">Debit only</option>
+                    <option value="credit_only">Credit only</option>
+                  </select>
+                </FilterField>
+              )}
+              {vis.financialYear && (
+                <FilterField label="Financial year">
+                  <select
+                    value={advancedFilters.financialYear}
+                    onChange={(e) => onAdvancedFilterChange('financialYear', e.target.value)}
+                    className="filter-control"
+                  >
+                    <option value="">All FY</option>
+                    {FINANCIAL_YEARS.map((fy) => (
+                      <option key={fy} value={fy}>{fy}</option>
+                    ))}
+                  </select>
+                </FilterField>
+              )}
+              {vis.month && (
+                <FilterField label="Month">
+                  <select
+                    value={advancedFilters.month}
+                    onChange={(e) => onAdvancedFilterChange('month', e.target.value)}
+                    className="filter-control"
+                  >
+                    <option value="">All months</option>
+                    {MONTHS.map((m) => (
+                      <option key={m} value={m}>{monthLabel(m)}</option>
+                    ))}
+                  </select>
+                </FilterField>
+              )}
+              {vis.minClientTxCount && (
+                <FilterField label="Min client tx count">
+                  <input inputMode="numeric" placeholder="e.g. 10" value={advancedFilters.minClientTxCount} onChange={(e) => onAdvancedFilterChange('minClientTxCount', e.target.value)} className="filter-control" />
+                </FilterField>
+              )}
+              {vis.minClientAmount && (
+                <FilterField label="Min client total (₹)">
+                  <input inputMode="numeric" placeholder="e.g. 100000" value={advancedFilters.minClientAmount} onChange={(e) => onAdvancedFilterChange('minClientAmount', e.target.value)} className="filter-control" />
+                </FilterField>
+              )}
+              {vis.sameAmountCount && (
+                <FilterField label="Same amt. count">
+                  <input inputMode="numeric" placeholder="e.g. 5" value={advancedFilters.sameAmountCount} onChange={(e) => onAdvancedFilterChange('sameAmountCount', e.target.value)} className="filter-control" title="Filter transactions with same amount appearing N+ times" />
+                </FilterField>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 mt-2.5">
+              {vis.weekend && (
+                <TogglePill active={advancedFilters.weekend} onClick={() => onAdvancedFilterChange('weekend', !advancedFilters.weekend)}>Weekend only</TogglePill>
+              )}
+              {vis.repeatClients && (
+                <TogglePill active={advancedFilters.showRepeatClients} onClick={() => onAdvancedFilterChange('showRepeatClients', !advancedFilters.showRepeatClients)}>Repeat clients</TogglePill>
+              )}
+              {vis.suspiciousClients && (
+                <TogglePill active={advancedFilters.showSuspiciousClients} onClick={() => onAdvancedFilterChange('showSuspiciousClients', !advancedFilters.showSuspiciousClients)}>Suspicious clients</TogglePill>
+              )}
+              {vis.structuring && (
+                <TogglePill active={advancedFilters.manySmallTx} onClick={() => onAdvancedFilterChange('manySmallTx', !advancedFilters.manySmallTx)}>Structuring</TogglePill>
+              )}
             </div>
           </div>
+          )}
 
-          {/* ─── Section 4: Document & Advanced ───────────────── */}
+          {/* ─── Advanced (document controls, only when visible) ── */}
+          {(vis.pdfFile || vis.pageRange) && (
           <div className="border-t border-[var(--border)] pt-2.5 pb-1">
             <SectionHeader
               icon={<FileText className="h-3.5 w-3.5" strokeWidth={1.5} />}
               title="Document & Advanced"
             />
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 mt-1.5">
-              <FilterField label="PDF file">
-                <select
-                  value={advancedFilters.pdfFile}
-                  onChange={(e) => onAdvancedFilterChange('pdfFile', e.target.value)}
-                  className="filter-control"
-                >
-                  <option value="">All PDFs</option>
-                  {pdfOptions.map((pdf) => (
-                    <option key={pdf.key} value={pdf.key}>{pdf.name} ({pdf.count})</option>
-                  ))}
-                </select>
-              </FilterField>
-              <FilterField label="Min page">
-                <input
-                  inputMode="numeric"
-                  placeholder="e.g. 1"
-                  value={advancedFilters.pageFrom}
-                  onChange={(e) => onAdvancedFilterChange('pageFrom', e.target.value)}
-                  className="filter-control"
-                />
-              </FilterField>
-              <FilterField label="Max page">
-                <input
-                  inputMode="numeric"
-                  placeholder="e.g. 50"
-                  value={advancedFilters.pageTo}
-                  onChange={(e) => onAdvancedFilterChange('pageTo', e.target.value)}
-                  className="filter-control"
-                />
-              </FilterField>
-              <FilterField label="Min group count">
-                <input
-                  inputMode="numeric"
-                  placeholder="e.g. 3"
-                  value={advancedFilters.minGroupCount}
-                  onChange={(e) => onAdvancedFilterChange('minGroupCount', e.target.value)}
-                  className="filter-control"
-                />
-              </FilterField>
-              <FilterField label="Same amt. count">
-                <input
-                  inputMode="numeric"
-                  placeholder="e.g. 5"
-                  value={advancedFilters.sameAmountCount}
-                  onChange={(e) => onAdvancedFilterChange('sameAmountCount', e.target.value)}
-                  className="filter-control"
-                  title="Filter transactions with same amount appearing N+ times"
-                />
-              </FilterField>
-            </div>
-
-            {/* Advanced thresholds row */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
-              <FilterField label="Min client tx count">
-                <input
-                  inputMode="numeric"
-                  placeholder="e.g. 10"
-                  value={advancedFilters.minClientTxCount}
-                  onChange={(e) => onAdvancedFilterChange('minClientTxCount', e.target.value)}
-                  className="filter-control"
-                />
-              </FilterField>
-              <FilterField label="Min client total (₹)">
-                <input
-                  inputMode="numeric"
-                  placeholder="e.g. 100000"
-                  value={advancedFilters.minClientAmount}
-                  onChange={(e) => onAdvancedFilterChange('minClientAmount', e.target.value)}
-                  className="filter-control"
-                />
-              </FilterField>
-            </div>
-
-            {/* Toggle pills for boolean filters */}
-            <div className="flex flex-wrap items-center gap-2 mt-3">
-              <TogglePill
-                active={advancedFilters.showRepeatClients}
-                onClick={() => onAdvancedFilterChange('showRepeatClients', !advancedFilters.showRepeatClients)}
-              >
-                Repeat clients
-              </TogglePill>
-              <TogglePill
-                active={advancedFilters.showSuspiciousClients}
-                onClick={() => onAdvancedFilterChange('showSuspiciousClients', !advancedFilters.showSuspiciousClients)}
-              >
-                Suspicious clients
-              </TogglePill>
-              <TogglePill
-                active={advancedFilters.manySmallTx}
-                onClick={() => onAdvancedFilterChange('manySmallTx', !advancedFilters.manySmallTx)}
-              >
-                Structuring (many small tx)
-              </TogglePill>
+              {vis.pdfFile && (
+                <FilterField label="PDF file">
+                  <select value={advancedFilters.pdfFile} onChange={(e) => onAdvancedFilterChange('pdfFile', e.target.value)} className="filter-control">
+                    <option value="">All PDFs</option>
+                    {pdfOptions.map((pdf) => (
+                      <option key={pdf.key} value={pdf.key}>{pdf.name} ({pdf.count})</option>
+                    ))}
+                  </select>
+                </FilterField>
+              )}
+              {vis.pageRange && (
+                <FilterField label="Min page">
+                  <input inputMode="numeric" placeholder="e.g. 1" value={advancedFilters.pageFrom} onChange={(e) => onAdvancedFilterChange('pageFrom', e.target.value)} className="filter-control" />
+                </FilterField>
+              )}
+              {vis.pageRange && (
+                <FilterField label="Max page">
+                  <input inputMode="numeric" placeholder="e.g. 50" value={advancedFilters.pageTo} onChange={(e) => onAdvancedFilterChange('pageTo', e.target.value)} className="filter-control" />
+                </FilterField>
+              )}
             </div>
           </div>
+          )}
 
         </div>
       )}

@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import getPort from 'get-port'
 import fs from 'node:fs'
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const APP_ROOT = findProjectRoot(__dirname)
 

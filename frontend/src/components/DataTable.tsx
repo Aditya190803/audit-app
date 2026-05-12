@@ -3,12 +3,12 @@ import {
   useReactTable,
   getCoreRowModel,
   getSortedRowModel,
-  getFilteredRowModel,
   flexRender,
   type SortingState,
   type ColumnDef,
   type VisibilityState
 } from '@tanstack/react-table'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { ArrowUpDown, ArrowUp, ArrowDown, CheckSquare, Square, Columns, ChevronDown, Check, StickyNote, Flag } from 'lucide-react'
 import type { Tag, Transaction } from '../types/api'
 import { formatTagReason, TagBadgeList } from './TagBadge'
@@ -55,7 +55,7 @@ const ALL_COLUMNS = [
   { id: 'actions', label: 'Actions' },
 ]
 
-export const DataTable: React.FC<DataTableProps> = ({
+export const DataTable: React.FC<DataTableProps> = React.memo(({
   transactions,
   selectedIds,
   onSelectTransaction,
@@ -72,8 +72,11 @@ export const DataTable: React.FC<DataTableProps> = ({
   const [colsOpen, setColsOpen] = useState(false)
   const colsRef = useRef<HTMLDivElement>(null)
   const lastClickedId = useRef<number | null>(null)
+  const tableContainerRef = useRef<HTMLDivElement>(null)
+  const selectedIdsRef = useRef(selectedIds)
+  selectedIdsRef.current = selectedIds
 
-  function hasTextSelectionWithinRow(rowElement: HTMLTableRowElement) {
+  function hasTextSelectionWithinRow(rowElement: HTMLElement) {
     const selection = window.getSelection()
     if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false
 
@@ -148,7 +151,7 @@ export const DataTable: React.FC<DataTableProps> = ({
           }}
           className="p-1 text-[var(--text-tertiary)] hover:text-[var(--primary)] transition-colors duration-150"
         >
-          {selectedIds.includes(row.original.id) ? (
+          {selectedIdsRef.current.includes(row.original.id) ? (
             <CheckSquare className="h-4 w-4 text-[var(--primary)]" strokeWidth={2} />
           ) : (
             <Square className="h-4 w-4" strokeWidth={1.5} />
@@ -175,8 +178,8 @@ export const DataTable: React.FC<DataTableProps> = ({
       cell: (info) => {
         const tx = info.row.original
         return (
-          <div className="min-w-[360px] max-w-[680px] whitespace-normal break-words">
-            <p className="text-sm text-[var(--text-primary)] leading-5 whitespace-normal break-words">
+          <div className="min-w-[360px] max-w-[680px]">
+            <p className="text-sm text-[var(--text-primary)] leading-5 truncate" title={tx.description || tx.raw_text || tx.party_name || '-'}>
               {tx.description || tx.raw_text || tx.party_name || '-'}
             </p>
           </div>
@@ -336,7 +339,7 @@ export const DataTable: React.FC<DataTableProps> = ({
       },
       size: 60
     }
-  ], [selectedIds, onSelectTransaction, onRemoveTag, onAddTag])
+  ], [onSelectTransaction, onRemoveTag, onAddTag])
 
   const table = useReactTable({
     data: filteredData,
@@ -349,8 +352,14 @@ export const DataTable: React.FC<DataTableProps> = ({
       saveVisibility(next, sessionId)
     },
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel()
+    getSortedRowModel: getSortedRowModel()
+  })
+
+  const rowVirtualizer = useVirtualizer({
+    count: table.getRowModel().rows.length,
+    getScrollElement: () => tableContainerRef.current,
+    estimateSize: () => 48,
+    overscan: 5,
   })
 
   if (filteredData.length === 0 && transactions.length > 0) {
@@ -408,45 +417,63 @@ export const DataTable: React.FC<DataTableProps> = ({
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            {table.getHeaderGroups().map((hg) => (
-              <tr key={hg.id} className="border-b border-[var(--border)]">
-                {hg.headers.map((header) => (
-                  <th
-                    key={header.id}
-                    className="px-3 py-2.5 text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider whitespace-nowrap"
-                    style={{ width: header.getSize() }}
-                  >
-                    {flexRender(header.column.columnDef.header, header.getContext())}
-                  </th>
-                ))}
-              </tr>
-            ))}
-          </thead>
-          <tbody className="divide-y divide-[var(--border)]">
-            {table.getRowModel().rows.map((row) => (
-              <tr
+      <div ref={tableContainerRef} className="flex-1 overflow-auto">
+        {/* Header */}
+        <div className="sticky top-0 z-10 bg-[var(--surface)]">
+          {table.getHeaderGroups().map((hg) => (
+            <div key={hg.id} className="flex border-b border-[var(--border)]">
+              {hg.headers.map((header) => (
+                <div
+                  key={header.id}
+                  className="px-3 py-2.5 text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider whitespace-nowrap shrink-0"
+                  style={{ width: header.getSize() }}
+                >
+                  {flexRender(header.column.columnDef.header, header.getContext())}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        {/* Virtualized body */}
+        <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative', contain: 'layout style' }}>
+          {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+            const row = table.getRowModel().rows[virtualRow.index]
+            const isSelected = selectedIdsRef.current.includes(row.original.id)
+            return (
+              <div
                 key={row.id}
+                data-index={virtualRow.index}
                 onClick={(e) => {
                   if (hasTextSelectionWithinRow(e.currentTarget)) return
                   onSelectTransaction(row.original.id)
                 }}
-                className={`group cursor-pointer transition-colors duration-150 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-                  selectedIds.includes(row.original.id) ? 'bg-[var(--primary-subtle)]' : 'hover:bg-[var(--surface-hover)]'
+                className={`group flex cursor-pointer border-b border-[var(--border)] ${
+                  isSelected ? 'bg-[var(--primary-subtle)]' : 'hover:bg-[var(--surface-hover)]'
                 }`}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: `${virtualRow.size}px`,
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
               >
                 {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id} className="px-3 py-2">
+                  <div
+                    key={cell.id}
+                    className="px-3 py-2 shrink-0"
+                    style={{ width: cell.column.getSize() }}
+                  >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </td>
+                  </div>
                 ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
-}
+})

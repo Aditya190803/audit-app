@@ -81,7 +81,7 @@ export function formatTagReason(tag: Tag): string {
   return tag.reason || tag.tag_type
 }
 
-export const TagBadge: React.FC<TagBadgeProps> = ({ tag, onRemove, onCycle, showConfidence = true }) => {
+export const TagBadge: React.FC<TagBadgeProps> = React.memo(({ tag, onRemove, onCycle, showConfidence = true }) => {
   const cls = tagClasses[tag.tag_type] || tagClasses.client
 
   return (
@@ -114,13 +114,13 @@ export const TagBadge: React.FC<TagBadgeProps> = ({ tag, onRemove, onCycle, show
       )}
     </span>
   )
-}
+})
 
 export const TagBadgeList: React.FC<{
   tags: Tag[]
   onRemoveTag?: (tagId: number) => void
   onCycleTag?: (tag: Tag) => void
-}> = ({ tags, onRemoveTag, onCycleTag }) => {
+}> = React.memo(({ tags, onRemoveTag, onCycleTag }) => {
   if (!tags || tags.length === 0) return (
     <span className="text-xs text-[var(--text-tertiary)] italic">Untagged</span>
   )
@@ -128,4 +128,4 @@ export const TagBadgeList: React.FC<{
   return (
     <TagBadge tag={tag} onRemove={onRemoveTag} onCycle={onCycleTag} showConfidence={false} />
   )
-}
+})

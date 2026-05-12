@@ -126,7 +126,8 @@
   }
 
   .filter-toggle[data-active="true"] {
-    @apply bg-[var(--primary-subtle)] text-[var(--primary)] border-[var(--primary)]/30;
+    @apply bg-[var(--primary-subtle)] text-[var(--primary)] border-[var(--primary)];
+    border-color: color-mix(in srgb, var(--primary) 30%, transparent);
   }
 
   .filter-toggle[data-active="false"] {

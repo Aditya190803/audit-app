@@ -2,16 +2,13 @@ import React, { useState } from 'react'
 import {
   AlertTriangle,
   BarChart3,
-  Building2,
   ChevronDown,
   ChevronUp,
   LayoutList,
   TrendingDown,
   TrendingUp,
-  Users,
 } from 'lucide-react'
-import type { AdvancedFilters, AuditAnalytics, AuditGroup, ReviewView } from '../utils/auditAnalytics'
-import { GroupTable } from './GroupTable'
+import type { AdvancedFilters, AuditAnalytics, ReviewView } from '../utils/auditAnalytics'
 import { SummaryView } from './SummaryView'
 import { ExceptionsView } from './ExceptionsView'
 import { QuickStats } from './QuickStats'
@@ -19,8 +16,6 @@ import { QuickStats } from './QuickStats'
 interface AuditReviewPanelProps {
   analytics: AuditAnalytics
   reviewView: ReviewView
-  selectedClientKey?: string
-  selectedPartyKey?: string
   onReviewViewChange: (view: ReviewView) => void
   onFilterChange: <K extends keyof AdvancedFilters>(key: K, value: AdvancedFilters[K]) => void
 }
@@ -30,9 +25,7 @@ function money(value: number): string {
 }
 
 const VIEW_META: { key: ReviewView; label: string; icon: React.ReactNode }[] = [
-  { key: 'transactions', label: 'Transactions', icon: <LayoutList className="h-3.5 w-3.5" strokeWidth={1.5} /> },
-  { key: 'clients', label: 'Clients', icon: <Users className="h-3.5 w-3.5" strokeWidth={1.5} /> },
-  { key: 'parties', label: 'Parties', icon: <Building2 className="h-3.5 w-3.5" strokeWidth={1.5} /> },
+  { key: 'dashboard', label: 'Transactions', icon: <LayoutList className="h-3.5 w-3.5" strokeWidth={1.5} /> },
   { key: 'exceptions', label: 'Exceptions', icon: <AlertTriangle className="h-3.5 w-3.5" strokeWidth={1.5} /> },
   { key: 'summary', label: 'Summary', icon: <BarChart3 className="h-3.5 w-3.5" strokeWidth={1.5} /> },
 ]
@@ -40,22 +33,10 @@ const VIEW_META: { key: ReviewView; label: string; icon: React.ReactNode }[] = [
 export const AuditReviewPanel: React.FC<AuditReviewPanelProps> = ({
   analytics,
   reviewView,
-  selectedClientKey,
-  selectedPartyKey,
   onReviewViewChange,
   onFilterChange,
 }) => {
   const [compact, setCompact] = useState(false)
-
-  const handleSelectClient = (group: AuditGroup) => {
-    onFilterChange('clientName', group.key)
-    onReviewViewChange('transactions')
-  }
-
-  const handleSelectParty = (group: AuditGroup) => {
-    onFilterChange('partyName', group.key)
-    onReviewViewChange('transactions')
-  }
 
   return (
     <div className="bg-[var(--surface)] border-b border-[var(--border)] flex flex-col">
@@ -103,28 +84,8 @@ export const AuditReviewPanel: React.FC<AuditReviewPanelProps> = ({
       {/* Content */}
       {!compact && (
         <div className="flex-1 min-h-0 animate-fade-in-down">
-          {reviewView === 'transactions' && (
+          {reviewView === 'dashboard' && (
             <QuickStats analytics={analytics} />
-          )}
-
-          {reviewView === 'clients' && (
-            <GroupTable
-              groups={analytics.clientGroups}
-              selectedKey={selectedClientKey}
-              onSelect={handleSelectClient}
-              onClearSelection={selectedClientKey ? () => onFilterChange('clientName', '') : undefined}
-              label="Clients"
-            />
-          )}
-
-          {reviewView === 'parties' && (
-            <GroupTable
-              groups={analytics.partyGroups}
-              selectedKey={selectedPartyKey}
-              onSelect={handleSelectParty}
-              onClearSelection={selectedPartyKey ? () => onFilterChange('partyName', '') : undefined}
-              label="Parties"
-            />
           )}
 
           {reviewView === 'exceptions' && (

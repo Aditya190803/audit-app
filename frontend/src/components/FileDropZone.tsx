@@ -77,7 +77,6 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
   const [clientListFile, setClientListFile] = useState<File | null>(null)
   const [passwords, setPasswords] = useState<Record<string, string>>({})
   const [showPassword, setShowPassword] = useState(false)
-  const [encryptedFileNames, setEncryptedFileNames] = useState<string[]>([])
   const [invalidPdfNames, setInvalidPdfNames] = useState<string[]>([])
   const progressStartRef = useRef<number>(0)
   const [threshold, setThreshold] = useState<number>(50000)
@@ -247,42 +246,27 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
     return () => { cancelled = true }
   }, [clientListFile, apCodeColumn, sheetName, apCodeEnabled, excelWorkbook])
 
-  // Validate PDF headers + detect encryption
+  // Validate PDF headers
   useEffect(() => {
     if (pdfFiles.length === 0) {
-      setEncryptedFileNames([])
       setShowPassword(false)
       setInvalidPdfNames([])
       return
     }
     let completed = 0
     const badNames: string[] = []
-    const encNames: string[] = []
     for (const f of pdfFiles) {
-      // Check header for %PDF magic bytes
-      const headerBlob = f.slice(0, 4)
-      const headerReader = new FileReader()
-      headerReader.onload = (he) => {
-        const head = he.target?.result as string
-        if (head !== '%PDF') {
-          badNames.push(f.name)
+      const blob = f.slice(0, 4)
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const head = e.target?.result as string
+        if (head !== '%PDF') badNames.push(f.name)
+        completed++
+        if (completed === pdfFiles.length) {
+          setInvalidPdfNames(badNames)
         }
-        // Then check trailer for encryption
-        const trailerBlob = f.slice(Math.max(0, f.size - 8192))
-        const trailerReader = new FileReader()
-        trailerReader.onload = (te) => {
-          const text = te.target?.result as string
-          if (text.includes('/Encrypt')) encNames.push(f.name)
-          completed++
-          if (completed === pdfFiles.length) {
-            setInvalidPdfNames(badNames)
-            setEncryptedFileNames(encNames)
-            if (encNames.length > 0) setShowPassword(true)
-          }
-        }
-        trailerReader.readAsText(trailerBlob)
       }
-      headerReader.readAsText(headerBlob)
+      reader.readAsText(blob)
     }
   }, [pdfFiles])
 
@@ -555,7 +539,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
           {pdfFiles.map((f, i) => {
             const isInvalid = invalidPdfNames.includes(f.name)
             return (
-              <div key={i} className={`flex items-center gap-3 py-2 ${isInvalid ? 'opacity-50' : ''}`}>
+              <div key={f.name + f.size} className={`flex items-center gap-3 py-2 ${isInvalid ? 'opacity-50' : ''}`}>
                 <FileText className={`h-4 w-4 shrink-0 ${isInvalid ? 'text-[var(--danger)]' : 'text-[var(--danger)]'}`} strokeWidth={1.5} />
                 <div className="flex-1 min-w-0">
                   <p className={`text-sm font-medium truncate ${isInvalid ? 'text-[var(--danger)] line-through' : 'text-[var(--text-primary)]'}`}>
@@ -563,20 +547,18 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
                   </p>
                   <p className="text-xs text-[var(--text-tertiary)]">{formatFileSize(f.size)}{isInvalid ? ' — invalid PDF' : ''}</p>
                 </div>
-                {encryptedFileNames.includes(f.name) && (
-                  <button
-                    onClick={() => setShowPassword(!showPassword)}
-                    className={`p-1.5 rounded-[var(--radius-sm)] transition-colors duration-150 ${showPassword ? 'text-[var(--primary)]' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'}`}
-                    title={passwords[f.name] ? 'Password set' : 'Password required'}
-                  >
-                    <Lock className="h-3.5 w-3.5" strokeWidth={2} />
-                  </button>
-                )}
+                <button
+                  onClick={() => setShowPassword(!showPassword)}
+                  className={`p-1.5 rounded-[var(--radius-sm)] transition-colors duration-150 ${passwords[f.name] ? 'text-[var(--primary)]' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'}`}
+                  title={passwords[f.name] ? 'Password set' : 'Set password (optional)'}
+                >
+                  <Lock className="h-3.5 w-3.5" strokeWidth={2} />
+                </button>
                 <button
                   onClick={() => {
                     const next = pdfFiles.filter((_, j) => j !== i)
                     setPdfFiles(next)
-                    if (next.length === 0) { setPasswords({}); setShowPassword(false); setEncryptedFileNames([]); setInvalidPdfNames([]) }
+                    if (next.length === 0) { setPasswords({}); setShowPassword(false); setInvalidPdfNames([]) }
                   }}
                   className="p-1 text-[var(--text-tertiary)] hover:text-[var(--danger)] transition-colors duration-150"
                 >
@@ -586,18 +568,18 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
             )
           })}
 
-          {showPassword && encryptedFileNames.length > 0 && (
-            <div className="space-y-2 border-l-2 border-[var(--warning)] pl-3 ml-1">
-              <p className="text-[11px] font-medium text-[var(--warning)]">Password required for encrypted PDFs:</p>
-              {encryptedFileNames.map((name) => (
-                <div key={name} className="flex items-center gap-2">
+          {showPassword && pdfFiles.length > 0 && (
+            <div className="space-y-2 border-l-2 border-[var(--border)] pl-3 ml-1">
+              <p className="text-[11px] font-medium text-[var(--text-tertiary)]">Passwords (optional):</p>
+              {pdfFiles.map((f) => (
+                <div key={f.name} className="flex items-center gap-2">
                   <Lock className="h-3 w-3 text-[var(--text-tertiary)] shrink-0" strokeWidth={1.5} />
-                  <span className="text-xs text-[var(--text-secondary)] truncate flex-1">{name}</span>
+                  <span className="text-xs text-[var(--text-secondary)] truncate flex-1">{f.name}</span>
                   <input
                     type="password"
                     placeholder="Enter password"
-                    value={passwords[name] || ''}
-                    onChange={(e) => setPasswords((prev) => ({ ...prev, [name]: e.target.value }))}
+                    value={passwords[f.name] || ''}
+                    onChange={(e) => setPasswords((prev) => ({ ...prev, [f.name]: e.target.value }))}
                     className="input-field w-40 text-xs"
                   />
                 </div>

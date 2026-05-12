@@ -6,34 +6,21 @@ import {
   Trash2,
   ChevronLeft,
   ChevronRight,
-  Eye,
   X,
-  Users,
-  Building2,
   AlertTriangle,
-  LayoutList,
   CheckSquare,
   Search
 } from 'lucide-react'
 
-function firstPdfPath(pdf_path: string | null): string | null {
-  if (!pdf_path) return null
-  try {
-    const parsed = JSON.parse(pdf_path)
-    if (Array.isArray(parsed)) return parsed[0] || null
-  } catch {}
-  return pdf_path
-}
 import { useUIStore } from '../stores/uiStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { FileDropZone } from './FileDropZone'
 import { DataTable } from './DataTable'
 import { SearchFilters } from './SearchFilters'
-import { AuditReviewPanel } from './AuditReviewPanel'
+import { AuditReviewPage } from './AuditReviewPage'
 import { SettingsPanel } from './SettingsPanel'
 import { ExportPanel } from './ExportPanel'
-import { PDFPreview } from './PDFPreview'
 import { KeyboardShortcuts } from './KeyboardShortcuts'
 import { ToastContainer } from './Toast'
 import {
@@ -44,20 +31,10 @@ import {
   removeTag,
   renameSession
 } from '../lib/api'
-import { buildAuditAnalytics, DEFAULT_ADVANCED_FILTERS } from '../utils/auditAnalytics'
-
-type ResultFilter = 'all' | 'client' | 'broker' | 'suspicious'
-
-const RESULT_FILTER_META: { key: ResultFilter; label: string; icon: React.ReactNode; colorVar: string; bgVar: string }[] = [
-  { key: 'all', label: 'All', icon: <LayoutList className="h-3.5 w-3.5" strokeWidth={2} />, colorVar: 'var(--text-primary)', bgVar: 'var(--surface-hover)' },
-  { key: 'client', label: 'Client', icon: <Users className="h-3.5 w-3.5" strokeWidth={2} />, colorVar: 'var(--success)', bgVar: 'var(--success-subtle)' },
-  { key: 'broker', label: 'Broker', icon: <Building2 className="h-3.5 w-3.5" strokeWidth={2} />, colorVar: 'var(--warning)', bgVar: 'var(--warning-subtle)' },
-  { key: 'suspicious', label: 'Suspicious', icon: <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2} />, colorVar: 'var(--danger)', bgVar: 'var(--danger-subtle)' },
-]
+import { DEFAULT_ADVANCED_FILTERS, EMPTY_AUDIT_ANALYTICS } from '../utils/auditAnalytics'
+import { useAuditAnalyticsWorker } from '../hooks/useAuditAnalyticsWorker'
 
 export const AppShell: React.FC = () => {
-  const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false)
-  const [currentPdfPage, setCurrentPdfPage] = useState(1)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sessionId: number } | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null)
   const [renameId, setRenameId] = useState<number | null>(null)
@@ -65,6 +42,7 @@ export const AppShell: React.FC = () => {
   const renameInputRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const [sessionSearch, setSessionSearch] = useState('')
+  const [mainView, setMainView] = useState<'data' | 'review'>('data')
 
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
 
@@ -129,15 +107,15 @@ export const AppShell: React.FC = () => {
     return [resultFilter, ...filterTags.filter((t) => t !== resultFilter)]
   }, [resultFilter, filterTags])
 
-  const baseAnalytics = useMemo(
-    () => buildAuditAnalytics(transactions, '', [], DEFAULT_ADVANCED_FILTERS, suspiciousThreshold),
-    [transactions, suspiciousThreshold]
+  const { data: baseAnalyticsData } = useAuditAnalyticsWorker(
+    transactions, '', [], DEFAULT_ADVANCED_FILTERS, suspiciousThreshold, EMPTY_AUDIT_ANALYTICS
   )
+  const baseAnalytics = baseAnalyticsData || EMPTY_AUDIT_ANALYTICS
 
-  const auditAnalytics = useMemo(
-    () => buildAuditAnalytics(transactions, searchQuery, effectiveFilterTags, advancedFilters, suspiciousThreshold),
-    [transactions, searchQuery, effectiveFilterTags, advancedFilters, suspiciousThreshold]
+  const { data: auditAnalyticsData, isComputing: isAuditComputing } = useAuditAnalyticsWorker(
+    transactions, searchQuery, effectiveFilterTags, advancedFilters, suspiciousThreshold, EMPTY_AUDIT_ANALYTICS
   )
+  const auditAnalytics = auditAnalyticsData || EMPTY_AUDIT_ANALYTICS
 
   const clientOptions = useMemo(
     () => baseAnalytics.clientGroups.map((group) => ({ key: group.key, name: group.name, count: group.count })),
@@ -159,6 +137,11 @@ export const AppShell: React.FC = () => {
       .map(([name, count]) => ({ key: name, name, count }))
       .sort((a, b) => b.count - a.count)
   }, [transactions])
+
+  const brokerOptions = useMemo(
+    () => baseAnalytics.brokerGroups.map((group) => ({ key: group.key, name: group.name, count: group.count })),
+    [baseAnalytics.brokerGroups]
+  )
 
   // Count transactions per result filter from current view
   const filteredSessions = useMemo(() => {
@@ -220,6 +203,10 @@ export const AppShell: React.FC = () => {
     setRenameValue('')
   }
 
+  const handleRemoveFilterTag = useCallback((tag: string) => {
+    setFilterTags(filterTags.filter((t) => t !== tag))
+  }, [filterTags, setFilterTags])
+
   const handleGoHome = useCallback(() => {
     goHome()
     setCurrentSession(null)
@@ -246,12 +233,12 @@ export const AppShell: React.FC = () => {
     await processFiles(pdfArr, clientList, threshold, options)
   }
 
-  const handleRemoveTag = async (tagId: number) => {
+  const handleRemoveTag = useCallback(async (tagId: number) => {
     await removeTag(tagId)
     await refreshCurrentSession()
-  }
+  }, [refreshCurrentSession])
 
-  const handleAddTag = async (transactionId: number, tagType: string) => {
+  const handleAddTag = useCallback(async (transactionId: number, tagType: string) => {
     const { pushToast } = useUIStore.getState()
     const existing = await getTags(transactionId)
     const prevTags = existing.data.map((t) => ({ id: t.id, tag_type: t.tag_type, source: t.source, is_manual: t.is_manual, reason: t.reason }))
@@ -276,22 +263,18 @@ export const AppShell: React.FC = () => {
         }
       }
     })
-  }
+  }, [refreshCurrentSession])
 
-  const handleBulkTag = async (tagType: string) => {
+  const handleBulkTag = useCallback(async (tagType: string) => {
     if (selectedTransactionIds.length === 0) return
     await bulkAddTags(selectedTransactionIds, tagType)
     clearSelection()
     await refreshCurrentSession()
-  }
+  }, [selectedTransactionIds, clearSelection, refreshCurrentSession])
 
-  const handleSelectTransaction = (id: number, multi?: boolean) => {
+  const handleSelectTransaction = useCallback((id: number, multi?: boolean) => {
     selectTransaction(id, multi)
-    const tx = transactions.find((t) => t.id === id)
-    if (tx?.page_number) {
-      setCurrentPdfPage(tx.page_number)
-    }
-  }
+  }, [selectTransaction])
 
   return (
     <div className="h-full flex bg-[var(--bg)]">
@@ -419,6 +402,22 @@ export const AppShell: React.FC = () => {
               <h2 className="text-sm font-semibold text-[var(--text-primary)] truncate">
                 {currentSession.name || `Session ${currentSession.id}`}
               </h2>
+
+              <div className="flex bg-[var(--bg)] p-0.5 ml-4 rounded-[var(--radius-md)] border border-[var(--border)]">
+                <button 
+                  onClick={() => setMainView('data')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-[var(--radius-sm)] transition-all ${mainView === 'data' ? 'bg-[var(--surface)] text-[var(--primary)] shadow-sm ring-1 ring-[var(--border)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                >
+                  Transactions
+                </button>
+                <button 
+                  onClick={() => setMainView('review')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-[var(--radius-sm)] transition-all ${mainView === 'review' ? 'bg-[var(--surface)] text-[var(--primary)] shadow-sm ring-1 ring-[var(--border)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                >
+                  Audit Review
+                </button>
+              </div>
+
               <div className="flex-1" />
 
               {tagSummary && (
@@ -487,16 +486,6 @@ export const AppShell: React.FC = () => {
                 </div>
               )}
 
-              {firstPdfPath(currentSession?.pdf_path ?? null) && (
-                <button
-                  onClick={() => setPdfPreviewOpen(!pdfPreviewOpen)}
-                  className={`btn-ghost ${pdfPreviewOpen ? 'text-[var(--primary)] bg-[var(--primary-subtle)]' : ''}`}
-                  title="Toggle PDF preview"
-                >
-                  <Eye className="h-4 w-4" strokeWidth={1.5} />
-                </button>
-              )}
-
               <button onClick={toggleExport} className="btn-secondary flex items-center gap-1.5 text-xs">
                 <Download className="h-3.5 w-3.5" strokeWidth={2} />
                 Export
@@ -539,89 +528,66 @@ export const AppShell: React.FC = () => {
             </div>
           ) : (
             <div className="h-full flex">
-              <div className={`flex-1 flex flex-col min-w-0 ${pdfPreviewOpen ? 'w-3/5' : 'w-full'}`}>
+              {mainView === 'data' ? (
+                <div className="flex-1 flex flex-col min-w-0">
                 <SearchFilters
-                  searchQuery={searchQuery}
-                  filterTags={filterTags}
-                  advancedFilters={advancedFilters}
-                  filtersExpanded={filtersExpanded}
-                  clientOptions={clientOptions}
-                  partyOptions={partyOptions}
-                  pdfOptions={pdfOptions}
-                  activeFilterCount={activeFilterCount()}
-                  onSearchChange={setSearchQuery}
-                  onAdvancedFilterChange={setAdvancedFilter}
-                  onClearFilters={resetAdvancedFilters}
-                  onToggleFiltersExpanded={toggleFiltersExpanded}
-                  onRemoveFilterTag={(tag) => setFilterTags(filterTags.filter((t) => t !== tag))}
-                />
-
-                {/* Result Filter Tabs */}
-                <div className="px-3 py-2 border-b border-[var(--border)] bg-[var(--surface)] flex items-center gap-2">
-                  {RESULT_FILTER_META.map((meta) => {
-                    const isActive = resultFilter === meta.key
-                    const count = filterCounts[meta.key]
-                    return (
-                      <button
-                        key={meta.key}
-                        onClick={() => setResultFilter(meta.key)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] border transition-colors duration-150 ${
-                          isActive
-                            ? `bg-[${meta.bgVar}] text-[${meta.colorVar}] border-current`
-                            : 'bg-white border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
-                        }`}
-                        style={isActive ? { backgroundColor: meta.bgVar, color: meta.colorVar, borderColor: meta.colorVar + '40' } : undefined}
-                      >
-                        {meta.icon}
-                        {meta.label}
-                        <span className={`ml-0.5 text-[10px] px-1 py-0 rounded-full ${isActive ? 'bg-current/10' : 'bg-[var(--bg)] text-[var(--text-tertiary)]'}`} style={isActive ? { color: meta.colorVar } : undefined}>
-                          {count}
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-
-                <AuditReviewPanel
-                  analytics={auditAnalytics}
-                  reviewView={reviewView}
-                  selectedClientKey={advancedFilters.clientName || undefined}
-                  selectedPartyKey={advancedFilters.partyName || undefined}
-                  onReviewViewChange={setReviewView}
-                  onFilterChange={setAdvancedFilter}
-                />
-
-                {isLoading ? (
-                  <div className="flex-1 flex items-center justify-center">
-                    <div className="animate-spin rounded-full h-6 w-6 border-2 border-[var(--border-strong)] border-t-[var(--primary)]" />
-                  </div>
-                ) : (
-                  <div className="flex-1 flex flex-col min-h-0">
-                    <DataTable
-                      transactions={auditAnalytics.filteredTransactions}
-                      selectedIds={selectedTransactionIds}
-                      onSelectTransaction={handleSelectTransaction}
-                      onRemoveTag={handleRemoveTag}
-                      onAddTag={handleAddTag}
-                      searchQuery=""
-                      filterTags={[]}
-                      minAmount={minAmount}
-                      maxAmount={maxAmount}
-                      sessionId={currentSession?.id}
-                    />
-                  </div>
-                )}
-              </div>
-              {pdfPreviewOpen && firstPdfPath(currentSession?.pdf_path ?? null) && (
-                <div className="w-2/5 border-l border-[var(--border)] bg-[var(--bg)]">
-                  <PDFPreview
-                    pdfPath={firstPdfPath(currentSession?.pdf_path ?? null)}
-                    currentPage={currentPdfPage}
-                    onPageChange={setCurrentPdfPage}
-                    onClose={() => setPdfPreviewOpen(false)}
+                    searchQuery={searchQuery}
+                    filterTags={filterTags}
+                    advancedFilters={advancedFilters}
+                    filtersExpanded={filtersExpanded}
+                    resultFilter={resultFilter}
+                    filterCounts={filterCounts}
+                    clientOptions={clientOptions}
+                    brokerOptions={brokerOptions}
+                    partyOptions={partyOptions}
+                    pdfOptions={pdfOptions}
+                    activeFilterCount={activeFilterCount()}
+                    onSearchChange={setSearchQuery}
+                    onAdvancedFilterChange={setAdvancedFilter}
+                    onClearFilters={resetAdvancedFilters}
+                    onToggleFiltersExpanded={toggleFiltersExpanded}
+                    onRemoveFilterTag={handleRemoveFilterTag}
+                    onResultFilterChange={setResultFilter}
                   />
+
+                  {isLoading || isAuditComputing ? (
+                    <div className="flex-1 flex items-center justify-center">
+                      <div className="animate-spin rounded-full h-6 w-6 border-2 border-[var(--border-strong)] border-t-[var(--primary)]" />
+                    </div>
+                  ) : (
+                    <div className="flex-1 flex flex-col min-h-0">
+                      <DataTable
+                        transactions={auditAnalytics.filteredTransactions}
+                        selectedIds={selectedTransactionIds}
+                        onSelectTransaction={handleSelectTransaction}
+                        onRemoveTag={handleRemoveTag}
+                        onAddTag={handleAddTag}
+                        searchQuery=""
+                        filterTags={[]}
+                        minAmount={minAmount}
+                        maxAmount={maxAmount}
+                        sessionId={currentSession?.id}
+                      />
+                    </div>
+                  )}
                 </div>
+              ) : (
+                <AuditReviewPage
+                  analytics={auditAnalytics}
+                  activeTab={reviewView}
+                  onTabChange={setReviewView}
+                  onExceptionFilter={(key, value) => {
+                    if (key === 'resultFilter') {
+                      setResultFilter(value as 'client' | 'broker' | 'suspicious' | 'all')
+                    } else {
+                      setAdvancedFilter('exception', value as typeof advancedFilters.exception)
+                    }
+                    setMainView('data')
+                  }}
+                />
               )}
+
+              
             </div>
           )}
         </div>
