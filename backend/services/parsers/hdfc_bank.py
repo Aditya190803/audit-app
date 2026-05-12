@@ -254,7 +254,13 @@ class HDFCBankParser(BaseParser):
             if candidate and not cls._looks_like_bank_segment(candidate):
                 return cls._clean_party_candidate(candidate)
 
-        m = re.search(r"\bNEFT\s*DR-([^-]+)-", desc, re.IGNORECASE)
+        m = re.search(r"\bNEFT\s*DR-[^-]+-([^-]+)-", desc, re.IGNORECASE)
+        if m:
+            candidate = m.group(1).strip()
+            if candidate and not cls._looks_like_bank_segment(candidate):
+                return cls._clean_party_candidate(candidate)
+
+        m = re.search(r"\b(?:RTGS|IMPS)\s+(?:DR|CR)-[^-]+-([^-]+)-", desc, re.IGNORECASE)
         if m:
             candidate = m.group(1).strip()
             if candidate and not cls._looks_like_bank_segment(candidate):
@@ -267,7 +273,9 @@ class HDFCBankParser(BaseParser):
         m = re.search(r"^([A-Z][A-Z0-9 .&]{2,})-[A-Z0-9]", desc)
         if m:
             candidate = m.group(1).strip()
-            if candidate and not cls._looks_like_bank_segment(candidate):
+            if (candidate
+                    and not cls._looks_like_bank_segment(candidate)
+                    and not cls._looks_like_transaction_prefix(candidate)):
                 return cls._clean_party_candidate(candidate)
 
         m = re.search(r"\b(?:POS|OTHPOS)\d+\s*([A-Za-z][A-Za-z0-9 .&-]+)", desc, re.IGNORECASE)

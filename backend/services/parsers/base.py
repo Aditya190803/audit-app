@@ -101,6 +101,16 @@ class BaseParser(ABC):
 re.IGNORECASE,
 ))
 
+    @staticmethod
+    def _looks_like_transaction_prefix(text: str) -> bool:
+        return bool(re.fullmatch(
+            r"(?:NEFT|RTGS|IMPS)\s+(?:DR|CR)|"
+            r"CASH\s+(?:DEPOSIT|WITHDRAWAL|WDL)|"
+            r"(?:POS|ATM)\s+PURCHASE|ATM\s+WITHDRAWAL",
+            text.strip(),
+            re.IGNORECASE,
+        ))
+
     @classmethod
     def _clean_party_candidate(cls, text: Optional[str]) -> str:
         text = cls._clean_text(text)
@@ -157,6 +167,8 @@ re.IGNORECASE,
             r"\bNEFT\*[^*]+\*[^*]+\*\s*([A-Za-z][A-Za-z0-9 .&]+)",
             # NEFTO-PARTY (Union Bank NEFT format)
             r"\bNEFT\s*O[-/]\s*([A-Za-z][A-Za-z0-9 .&]+?)(?:\s*[/-]|\s*$)",
+            # NEFT DR-<party>-<ref> (HDFC and other banks with space before DR/CR)
+            r"\b(?:NEFT|RTGS|IMPS)\s+(?:DR|CR)[-/]([A-Za-z][A-Za-z0-9 .&]+?)(?:[-/]|$)",
             # Ecom/ref/MERCHANT/... (IDFC Bank format)
             r"\bEcom\s*/\s*\d+\s*/\s*([^/]+)",
             # IFT/ref/PARTY NAME/account/... (IDFC Bank format)
@@ -190,6 +202,7 @@ re.IGNORECASE,
                 continue
             if re.fullmatch(
                 r"\d+|[A-Z]{4}\d+|NA|UPI|DR|CR|NEFT|IMPS|MMT|BIL|ONL|P2A|P2M|MOB|"
+                r"NEFT (?:DR|CR)|RTGS (?:DR|CR)|IMPS (?:DR|CR)|CASH DEPOSIT|"
                 r"FUND TRANSFER|TRANSFER|KKBKTRANSFER|CASH WDL|CHARGE|PAYMENT FROM PH|"
                 r"WITHDRAW|DEPOSIT|WDL TFR|DEP TFR|RECURRING",
                 part,

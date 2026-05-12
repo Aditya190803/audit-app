@@ -139,6 +139,10 @@ class FuzzyService:
                     strong_hits.add(idx)
                     break
 
+                if any(len(root) >= 4 and root in tt and len(tt) >= len(root) + 3 for root in roots):
+                    strong_hits.add(idx)
+                    break
+
                 min_prefix = 2 if idx <= 1 and strong_hits else min(4, min(len(r) for r in roots))
                 if any(len(tt) >= min_prefix and root.startswith(tt) for root in roots):
                     prefix_hits.add(idx)

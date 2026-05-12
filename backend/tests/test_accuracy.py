@@ -94,6 +94,16 @@ class AccuracyTests(unittest.TestCase):
         )
         self.assertEqual(matches[0]["original"], "MITRAJ MUKESHBHAI DABHI")
 
+    def test_fuzzy_uses_embedded_name_tokens_from_compressed_hdfc_narration(self):
+        clients = CLIENTS + [
+            {"name": "AMBIKA SHRIRAMRANA BHAT", "raw_data": {}},
+        ]
+        matches = FuzzyService(0.75).match_client_names(
+            "NEFTDR-ICIC0000856-SHRIRAMRANAKBHAT-N ETBANK,MUM-N333232756797476-SALARY",
+            clients,
+        )
+        self.assertTrue(any(m["original"] == "AMBIKA SHRIRAMRANA BHAT" for m in matches))
+
     def test_fuzzy_ignores_transaction_words_as_name_evidence(self):
         matches = FuzzyService(0.75).match_client_names(
             "AKASH BH DEP TFR UPI/CR/647452817697/AKASH BH/SBIN/akashjotan/UPI",
