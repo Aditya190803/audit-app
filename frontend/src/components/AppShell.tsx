@@ -29,6 +29,7 @@ import { useSettingsStore } from '../stores/settingsStore'
 import { FileDropZone } from './FileDropZone'
 import { DataTable } from './DataTable'
 import { SearchFilters } from './SearchFilters'
+import { AuditReviewPanel } from './AuditReviewPanel'
 import { SettingsPanel } from './SettingsPanel'
 import { ExportPanel } from './ExportPanel'
 import { PDFPreview } from './PDFPreview'
@@ -42,6 +43,7 @@ import {
   removeTag,
   renameSession
 } from '../lib/api'
+import { buildAuditAnalytics, DEFAULT_ADVANCED_FILTERS } from '../utils/auditAnalytics'
 
 type ResultFilter = 'all' | 'client' | 'broker' | 'suspicious'
 
@@ -74,6 +76,9 @@ export const AppShell: React.FC = () => {
     resultFilter,
     minAmount,
     maxAmount,
+    reviewView,
+    advancedFilters,
+    filtersExpanded,
     toggleSidebar,
     toggleSettings,
     toggleExport,
@@ -83,6 +88,11 @@ export const AppShell: React.FC = () => {
     setSearchQuery,
     setFilterTags,
     setResultFilter,
+    setReviewView,
+    setAdvancedFilter,
+    resetAdvancedFilters,
+    toggleFiltersExpanded,
+    activeFilterCount,
   } = useUIStore()
 
   const {
@@ -92,6 +102,7 @@ export const AppShell: React.FC = () => {
     tagSummary,
     isLoading,
     isProcessing,
+    processingProgress,
     processingError,
     clearProcessingError,
     loadSessions,
@@ -103,6 +114,7 @@ export const AppShell: React.FC = () => {
 
   const { settings, loadSettings } = useSettingsStore()
   const brokers = (settings.broker_list as string[]) || []
+  const suspiciousThreshold = Number(currentSession?.settings_snapshot?.suspicious_threshold ?? settings.suspicious_threshold ?? settings.threshold ?? 50000)
 
   useEffect(() => {
     loadSessions()
@@ -114,6 +126,37 @@ export const AppShell: React.FC = () => {
     if (resultFilter === 'all') return filterTags
     return [resultFilter, ...filterTags.filter((t) => t !== resultFilter)]
   }, [resultFilter, filterTags])
+
+  const baseAnalytics = useMemo(
+    () => buildAuditAnalytics(transactions, '', [], DEFAULT_ADVANCED_FILTERS, suspiciousThreshold),
+    [transactions, suspiciousThreshold]
+  )
+
+  const auditAnalytics = useMemo(
+    () => buildAuditAnalytics(transactions, searchQuery, effectiveFilterTags, advancedFilters, suspiciousThreshold),
+    [transactions, searchQuery, effectiveFilterTags, advancedFilters, suspiciousThreshold]
+  )
+
+  const clientOptions = useMemo(
+    () => baseAnalytics.clientGroups.map((group) => ({ key: group.key, name: group.name, count: group.count })),
+    [baseAnalytics.clientGroups]
+  )
+
+  const partyOptions = useMemo(
+    () => baseAnalytics.partyGroups.map((group) => ({ key: group.key, name: group.name, count: group.count })),
+    [baseAnalytics.partyGroups]
+  )
+
+  const pdfOptions = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const tx of transactions) {
+      const name = tx.pdf_filename || 'Unknown'
+      map.set(name, (map.get(name) ?? 0) + 1)
+    }
+    return Array.from(map.entries())
+      .map(([name, count]) => ({ key: name, name, count }))
+      .sort((a, b) => b.count - a.count)
+  }, [transactions])
 
   // Count transactions per result filter from current view
   const filterCounts = useMemo(() => {
@@ -452,7 +495,12 @@ export const AppShell: React.FC = () => {
                     </button>
                   </div>
                 )}
-                <FileDropZone onFilesSelected={handleFilesSelected} isProcessing={isProcessing} brokers={brokers} />
+                <FileDropZone
+                  onFilesSelected={handleFilesSelected}
+                  isProcessing={isProcessing}
+                  processingProgress={processingProgress}
+                  brokers={brokers}
+                />
               </div>
             </div>
           ) : (
@@ -461,8 +509,17 @@ export const AppShell: React.FC = () => {
                 <SearchFilters
                   searchQuery={searchQuery}
                   filterTags={filterTags}
+                  advancedFilters={advancedFilters}
+                  filtersExpanded={filtersExpanded}
+                  clientOptions={clientOptions}
+                  partyOptions={partyOptions}
+                  pdfOptions={pdfOptions}
+                  activeFilterCount={activeFilterCount()}
                   onSearchChange={setSearchQuery}
-                  onFilterTagsChange={setFilterTags}
+                  onAdvancedFilterChange={setAdvancedFilter}
+                  onClearFilters={resetAdvancedFilters}
+                  onToggleFiltersExpanded={toggleFiltersExpanded}
+                  onRemoveFilterTag={(tag) => setFilterTags(filterTags.filter((t) => t !== tag))}
                 />
 
                 {/* Result Filter Tabs */}
@@ -491,6 +548,15 @@ export const AppShell: React.FC = () => {
                   })}
                 </div>
 
+                <AuditReviewPanel
+                  analytics={auditAnalytics}
+                  reviewView={reviewView}
+                  selectedClientKey={advancedFilters.clientName || undefined}
+                  selectedPartyKey={advancedFilters.partyName || undefined}
+                  onReviewViewChange={setReviewView}
+                  onFilterChange={setAdvancedFilter}
+                />
+
                 {isLoading ? (
                   <div className="flex-1 flex items-center justify-center">
                     <div className="animate-spin rounded-full h-6 w-6 border-2 border-[var(--border-strong)] border-t-[var(--primary)]" />
@@ -498,13 +564,13 @@ export const AppShell: React.FC = () => {
                 ) : (
                   <div className="flex-1 flex flex-col min-h-0">
                     <DataTable
-                      transactions={transactions}
+                      transactions={auditAnalytics.filteredTransactions}
                       selectedIds={selectedTransactionIds}
                       onSelectTransaction={handleSelectTransaction}
                       onRemoveTag={handleRemoveTag}
                       onAddTag={handleAddTag}
-                      searchQuery={searchQuery}
-                      filterTags={effectiveFilterTags}
+                      searchQuery=""
+                      filterTags={[]}
                       minAmount={minAmount}
                       maxAmount={maxAmount}
                     />

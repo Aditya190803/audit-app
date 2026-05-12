@@ -3,6 +3,7 @@ import { useDropzone } from 'react-dropzone'
 import { FileText, FileSpreadsheet, Lock, X, ArrowRight, ChevronDown, Search, Check, FolderOpen, FileIcon, RefreshCw, Building2 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { getParsers } from '../lib/api'
+import type { ParseProgress } from '../types/api'
 
 interface FileDropZoneProps {
   onFilesSelected: (
@@ -19,6 +20,7 @@ interface FileDropZoneProps {
     }
   ) => void
   isProcessing: boolean
+  processingProgress?: ParseProgress | null
   brokers?: string[]
 }
 
@@ -70,7 +72,7 @@ function bestNameColumnMatch(headers: string[]): string | null {
   return headers[0] ?? null
 }
 
-export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isProcessing, brokers = [] }) => {
+export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isProcessing, processingProgress, brokers = [] }) => {
   const [pdfFiles, setPdfFiles] = useState<File[]>([])
   const [clientListFile, setClientListFile] = useState<File | null>(null)
   const [password, setPassword] = useState('')
@@ -421,6 +423,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
   }
 
   const isReady = pdfFiles.length > 0 && clientListFile && !isProcessing && nameColumn.trim().length > 0 && invalidPdfNames.length === 0
+  const progressPercent = Math.max(0, Math.min(100, processingProgress?.percent ?? 0))
 
   const getClientListLabel = (file: File) => {
     if (file.name.endsWith('.csv')) return 'CSV'
@@ -945,6 +948,46 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
       </div>
 
       {/* Start Audit */}
+      {isProcessing && (
+        <div className="border border-[var(--border)] rounded-[var(--radius-lg)] bg-[var(--surface)] p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-[var(--text-primary)]">Audit in progress</p>
+              <p className="text-xs text-[var(--text-tertiary)] truncate">
+                {processingProgress?.message || 'Starting audit...'}
+              </p>
+            </div>
+            <span className="text-sm font-mono font-medium text-[var(--primary)] tabular-nums">
+              {progressPercent}%
+            </span>
+          </div>
+
+          <div
+            className="h-2 overflow-hidden rounded-full bg-[var(--surface-hover)]"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progressPercent}
+            aria-label="Audit progress"
+          >
+            <div
+              className="h-full rounded-full bg-[var(--primary)] transition-[width] duration-300 ease-out"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between text-[11px] text-[var(--text-tertiary)]">
+            <span className="capitalize">{(processingProgress?.stage || 'queued').replace(/_/g, ' ')}</span>
+            {processingProgress?.total_files && (
+              <span>
+                PDF {processingProgress.current_file || 1} of {processingProgress.total_files}
+                {processingProgress.total_pages ? ` · Page ${processingProgress.current_page || 1} of ${processingProgress.total_pages}` : ''}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       <button
         onClick={handleProcess}
         disabled={!isReady}

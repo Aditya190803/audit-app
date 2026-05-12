@@ -104,4 +104,47 @@
     @apply inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-[var(--radius-sm)];
     @apply bg-[var(--danger-subtle)] text-[var(--danger)];
   }
+
+  .filter-label {
+    @apply block text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider;
+  }
+
+  .filter-control {
+    @apply h-8 w-full bg-[var(--surface)] border border-[var(--border-strong)] rounded-[var(--radius-md)] px-2.5 text-xs text-[var(--text-primary)];
+    @apply focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent;
+    @apply placeholder:text-[var(--text-tertiary)];
+    transition: border-color 150ms cubic-bezier(0.25, 0.1, 0.25, 1), box-shadow 150ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  }
+
+  .filter-section-header {
+    @apply flex items-center gap-2 text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider py-1.5;
+  }
+
+  .filter-toggle {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full border cursor-pointer select-none;
+    transition: background-color 150ms cubic-bezier(0.25, 0.1, 0.25, 1), color 150ms cubic-bezier(0.25, 0.1, 0.25, 1), border-color 150ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  }
+
+  .filter-toggle[data-active="true"] {
+    @apply bg-[var(--primary-subtle)] text-[var(--primary)] border-[var(--primary)]/30;
+  }
+
+  .filter-toggle[data-active="false"] {
+    @apply bg-[var(--surface)] text-[var(--text-secondary)] border-[var(--border)] hover:border-[var(--border-strong)];
+  }
+
+  @keyframes fadeInDown {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-fade-in-down {
+    animation: fadeInDown 200ms cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
+  }
 }

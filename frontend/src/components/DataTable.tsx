@@ -9,9 +9,10 @@ import {
   type ColumnDef,
   type VisibilityState
 } from '@tanstack/react-table'
-import { ArrowUpDown, ArrowUp, ArrowDown, CheckSquare, Square, Columns, ChevronDown, Check } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, CheckSquare, Square, Columns, ChevronDown, Check, StickyNote, Flag } from 'lucide-react'
 import type { Tag, Transaction } from '../types/api'
 import { formatTagReason, TagBadgeList } from './TagBadge'
+import { updateReviewStatus, updateNotes } from '../lib/api'
 
 interface DataTableProps {
   transactions: Transaction[]
@@ -43,9 +44,11 @@ const ALL_COLUMNS = [
   { id: 'date', label: 'Date' },
   { id: 'description', label: 'Description' },
   { id: 'amount', label: 'Amount' },
+  { id: 'payment_method', label: 'Method' },
   { id: 'tags', label: 'Tag' },
   { id: 'reason', label: 'Reason' },
   { id: 'page_number', label: 'Page' },
+  { id: 'pdf_filename', label: 'PDF' },
 ]
 
 export const DataTable: React.FC<DataTableProps> = ({
@@ -173,6 +176,21 @@ export const DataTable: React.FC<DataTableProps> = ({
       size: 140
     },
     {
+      id: 'payment_method',
+      accessorKey: 'payment_method',
+      header: () => <span className="text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider">Method</span>,
+      cell: (info) => {
+        const val = info.getValue() as string | null
+        if (!val || val === 'OTHER') return <span className="text-xs text-[var(--text-tertiary)]">-</span>
+        return (
+          <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-sm)] text-[var(--text-secondary)]">
+            {val}
+          </span>
+        )
+      },
+      size: 70
+    },
+    {
       id: 'tags',
       accessorKey: 'tags',
       header: () => <span className="text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider">Tag</span>,
@@ -227,6 +245,66 @@ export const DataTable: React.FC<DataTableProps> = ({
           {info.getValue() != null ? String(info.getValue()) : '-'}
         </span>
       ),
+      size: 60
+    },
+    {
+      id: 'pdf_filename',
+      accessorKey: 'pdf_filename',
+      header: () => <span className="text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider">PDF</span>,
+      cell: (info) => {
+        const val = info.getValue() as string | null
+        if (!val) return <span className="text-xs text-[var(--text-tertiary)]">-</span>
+        const short = val.length > 20 ? val.slice(0, 17) + '...' : val
+        return <span className="text-[10px] text-[var(--text-tertiary)] font-mono truncate max-w-[80px] block" title={val}>{short}</span>
+      },
+      size: 90
+    },
+    {
+      id: 'actions',
+      header: () => null,
+      cell: ({ row }) => {
+        const tx = row.original
+        const status = tx.review_status || 'unreviewed'
+        return (
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                const next = status === 'unreviewed' ? 'reviewed' : status === 'reviewed' ? 'flagged' : 'unreviewed'
+                updateReviewStatus(tx.id, next)
+              }}
+              className={`p-1 rounded-[var(--radius-sm)] transition-colors ${
+                status === 'flagged'
+                  ? 'text-[var(--danger)] bg-[var(--danger-subtle)]'
+                  : status === 'reviewed'
+                  ? 'text-[var(--success)] bg-[var(--success-subtle)]'
+                  : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)]'
+              }`}
+              title={`Review status: ${status}`}
+            >
+              <Flag className="h-3 w-3" strokeWidth={2} />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                const current = tx.user_notes || ''
+                const notes = window.prompt('Add notes:', current)
+                if (notes !== null) {
+                  updateNotes(tx.id, notes)
+                }
+              }}
+              className={`p-1 rounded-[var(--radius-sm)] transition-colors ${
+                tx.user_notes
+                  ? 'text-[var(--primary)] bg-[var(--primary-subtle)]'
+                  : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)]'
+              }`}
+              title={tx.user_notes || 'Add notes'}
+            >
+              <StickyNote className="h-3 w-3" strokeWidth={2} />
+            </button>
+          </div>
+        )
+      },
       size: 60
     }
   ], [selectedIds, onSelectTransaction, onRemoveTag, onAddTag])
