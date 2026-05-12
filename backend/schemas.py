@@ -24,6 +24,11 @@ class TransactionBase(BaseModel):
     raw_text: Optional[str] = None
     page_number: Optional[int] = None
     bounding_box_json: Optional[Dict[str, Any]] = None
+    payment_method: Optional[str] = None
+    pdf_filename: Optional[str] = None
+    review_status: Optional[str] = "unreviewed"
+    user_notes: Optional[str] = None
+    exported_at: Optional[datetime] = None
 
 class TransactionCreate(TransactionBase):
     session_id: int
