@@ -153,16 +153,21 @@ class FuzzyService:
                     break
 
         hit_count = len(strong_hits | prefix_hits)
-        # Require the client's own leading name/surname token. Otherwise a
-        # family name plus unrelated initials can produce false positives.
-        if 0 not in (strong_hits | prefix_hits):
-            return None
 
-        if strong_hits and hit_count >= min(2, len(candidate_tokens)):
-            return min(0.95, 0.78 + (hit_count * 0.055) + (len(strong_hits) * 0.06))
         if len(candidate_tokens) == 1:
             return 0.9 if strong_hits else None
-        return None
+
+        if not strong_hits:
+            return None
+
+        # Require at least half the distinct tokens to carry evidence.
+        # For 3-token names like "AMBIKA SHRIRAMRANA BHAT", both
+        # "SHRIRAMRANA" and "BHAT" must find evidence in the text.
+        min_required = max(2, len(candidate_tokens) // 2 + 1)
+        if hit_count < min_required:
+            return None
+
+        return min(0.95, 0.78 + (hit_count * 0.055) + (len(strong_hits) * 0.06))
 
     def _has_client_evidence(self, text: str, candidate: str) -> bool:
         """Require real token evidence so short names don't match random substrings."""

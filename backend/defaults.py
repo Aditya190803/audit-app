@@ -3,10 +3,10 @@ import os
 import sys
 
 def _load_brokers():
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    brokers_path = os.path.join(project_root, "brokers_list.py")
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    brokers_path = os.path.join(backend_dir, "brokers_list.py")
     if os.path.exists(brokers_path):
-        sys.path.insert(0, project_root)
+        sys.path.insert(0, backend_dir)
         try:
             from brokers_list import BROKERS
             return sorted(BROKERS)

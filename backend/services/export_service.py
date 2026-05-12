@@ -116,7 +116,7 @@ class ExportService:
             if not tags:
                 continue
             
-            search_text = tx.party_name or tx.description or ""
+            search_text = tx.raw_text or tx.description or tx.party_name or ""
             if not search_text:
                 continue
 
@@ -133,19 +133,10 @@ class ExportService:
                     break
 
             if tag_type and tag_type in colors:
-                page_rect = page.rect
-                margin = 50
-                y0 = min(r.y0 for r in rects) - 2
-                y1 = max(r.y1 for r in rects) + 2
-
-                full_row_rect = fitz.Rect(
-                    margin, y0,
-                    page_rect.width - margin, y1
-                )
-
-                highlight = page.add_highlight_annot(full_row_rect)
-                highlight.set_colors(stroke=colors[tag_type])
-                highlight.update()
+                for rect in rects:
+                    highlight = page.add_highlight_annot(rect)
+                    highlight.set_colors(stroke=colors[tag_type])
+                    highlight.update()
         
         doc.save(output_path)
         doc.close()

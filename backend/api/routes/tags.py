@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from backend.database import get_db
+from backend.models import Tag
 from backend.schemas import TagCreate, TagResponse, BulkTagRequest
 from backend.services.tagging_service import TaggingService
 from backend.services.audit_service import AuditService

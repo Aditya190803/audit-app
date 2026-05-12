@@ -1,7 +1,10 @@
 import unittest
 import os
+import sys
 import tempfile
 import re
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from backend.services.csv_service import CSVService
 from backend.services.fuzzy_service import FuzzyService
@@ -17,7 +20,7 @@ from backend.services.parsers.union_bank import UnionBankParser
 from backend.services.parsers.sbi_standard import SBIStandardParser
 from backend.services.parsers.sbi_compact import SBICompactParser
 from backend.services.parsers import registry
-from brokers_list import BROKERS
+from backend.brokers_list import BROKERS
 
 
 CLIENTS = [

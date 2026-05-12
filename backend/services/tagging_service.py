@@ -139,9 +139,11 @@ class TaggingService:
         # Use per-session threshold if available, otherwise global config
         session_settings = session_settings or {}
         exclusions = self.config.get("broker_exclusions") or []
-        threshold = float(session_settings.get("suspicious_threshold", self.config.get_threshold()))
+        suspicious_threshold = float(session_settings.get("suspicious_threshold", self.config.get_threshold()))
+        fuzzy_threshold = self.config.get_fuzzy_threshold()
         recurring_window = int(self.config.get("recurring_days_window") or 30)
         suspicious_keywords = self.config.get("suspicious_keywords") or []
+        common_words = self.config.get("broker_common_words") or []
         
         # Build phone number map from client list (exact match only, no fuzzy)
         phone_map = self._build_phone_map(clients)
@@ -153,150 +155,82 @@ class TaggingService:
         ).delete(synchronize_session=False)
         self.db.flush()
         
-        new_tags = []
-        
         # Detect recurring transactions
         recurring_map = self._detect_recurring(transactions, recurring_window)
         
-        total_transactions = len(transactions)
-        for i, tx in enumerate(transactions, 1):
-            party_text = tx.party_name or ""
-            desc_text = tx.description or ""
-            full_text = f"{party_text} {desc_text}"
-            
-            # Extract clean party name from description for better matching
-            extracted_party = self._extract_party_name(full_text) or BaseParser._extract_party_from_description(desc_text)
-            match_text = extracted_party or party_text or desc_text
-            
-            # --- Priority: client > broker > suspicious ---
-            # Only one tag type per transaction to avoid conflicting tags
-            tagged = False
-            
-            # 1. Phone number exact match (most reliable)
-            phone_candidates = self._extract_phone_candidates(full_text)
-            for phone in phone_candidates:
-                if phone in phone_map:
-                    for client_name in phone_map[phone]:
-                        tag = Tag(
-                            transaction_id=tx.id,
-                            tag_type="client",
-                            confidence=1.0,
-                            reason=f"Phone match: {phone} -> '{client_name}'",
-                            source="auto",
-                            is_manual=False
-                        )
-                        new_tags.append(tag)
-                        self.db.add(tag)
-                        tagged = True
-                        break
-                if tagged:
-                    break
-            
-            if not tagged:
-                # 2. Fuzzy client name matching (using extracted name)
-                client_match_text = f"{match_text} {desc_text}".strip()
-                client_matches = self.fuzzy.match_client_names(client_match_text, clients, alias_list)
-                for match in client_matches:
-                    if match["score"] >= self.config.get_fuzzy_threshold():
-                        tag = Tag(
-                            transaction_id=tx.id,
-                            tag_type="client",
-                            confidence=match["score"],
-                            reason=f"Fuzzy match: '{match['original']}' (score: {match['score']})",
-                            source="auto",
-                            is_manual=False
-                        )
-                        new_tags.append(tag)
-                        self.db.add(tag)
-                        tagged = True
-                        break
-            
-            if not tagged:
-                # 3. Broker matching. Use the extracted counterparty, not the full
-                # narration, so intermediary bank names don't become broker hits.
-                # Skip broker matching if the party matches any client name (avoid
-                # tagging a client's own transaction as a broker hit).
-                common_words = self.config.get("broker_common_words") or []
-                broker_text = extracted_party or party_text
-                
-                # Check if the party text itself matches a client - if so, skip broker check
-                is_client_related = False
-                if broker_text:
-                    normalized_broker_text = self.fuzzy.normalize_text(broker_text)
-                    for c in clients:
-                        if normalized_broker_text == self.fuzzy.normalize_text(c["name"]):
-                            is_client_related = True
-                            break
-                    if not is_client_related:
-                        is_client_related = bool(self.fuzzy.match_client_names(broker_text, clients, alias_list))
-                
-                if not is_client_related:
-                    broker_matches = self.fuzzy.match_broker_names(broker_text, broker_names, exclusions, common_words)
-                    # Deduplicate: keep only the best-scoring match per canonical broker name
-                    seen_brokers = set()
-                    for match in broker_matches:
-                        if match["score"] < self.config.get_fuzzy_threshold():
-                            continue
-                        orig = match["original"]
-                        canonical = alias_to_canonical.get(orig, orig)
-                        if canonical in seen_brokers:
-                            continue
-                        seen_brokers.add(canonical)
-                        tag = Tag(
-                            transaction_id=tx.id,
-                            tag_type="broker",
-                            confidence=match["score"],
-                            reason=f"Broker match: '{orig}' (score: {match['score']})",
-                            source="auto",
-                            is_manual=False
-                        )
-                        new_tags.append(tag)
-                        self.db.add(tag)
-                        tagged = True
-                        break
-            
-            if not tagged:
-                # 4. Suspicious check (only for names not tagged as client or broker)
-                is_suspicious = False
-                reasons = []
-                
-                # Amount threshold
-                if tx.amount and abs(tx.amount) >= threshold:
-                    is_suspicious = True
-                    reasons.append(f"Amount {tx.amount} exceeds threshold {threshold}")
-                
-                # Recurring transaction to same party
-                if tx.id in recurring_map:
-                    is_suspicious = True
-                    reasons.append("Recurring transaction to same party")
-                
-                # Suspicious keywords in full text (party_name + description)
-                full_text_lower = full_text.lower()
-                for keyword in suspicious_keywords:
-                    if keyword.lower() in full_text_lower:
-                        is_suspicious = True
-                        reasons.append(f"Contains suspicious keyword: '{keyword}'")
-                
-                if is_suspicious:
-                    tag = Tag(
-                        transaction_id=tx.id,
-                        tag_type="suspicious",
-                        confidence=1.0,
-                        reason="; ".join(reasons),
-                        source="auto",
-                        is_manual=False
-                    )
-                    new_tags.append(tag)
-                    self.db.add(tag)
-
-            if progress_callback and (i == total_transactions or i % 25 == 0):
-                progress_callback(i, total_transactions)
+        # Prepare transaction data for multiprocessing (must be picklable)
+        tx_dicts = [
+            {
+                "id": t.id,
+                "party_name": t.party_name,
+                "description": t.description,
+                "amount": t.amount,
+                "date": t.date
+            }
+            for t in transactions
+        ]
         
+        import concurrent.futures
+        import os
+        from backend.services.tagging_worker import _process_transaction_batch
+        
+        # Split transactions into chunks for workers (cap at 3-4 cores)
+        max_workers = min(2, max(1, os.cpu_count() if os.cpu_count() else 2))
+        chunk_size = max(1, len(tx_dicts) // max_workers)
+        batches = [tx_dicts[i:i + chunk_size] for i in range(0, len(tx_dicts), chunk_size)]
+        
+        all_tags_data = []
+        completed = 0
+        total_transactions = len(transactions)
+        
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(
+                    _process_transaction_batch, 
+                    batch, clients, phone_map, broker_names, alias_list, alias_to_canonical,
+                    suspicious_threshold, fuzzy_threshold, exclusions, common_words, recurring_map, suspicious_keywords
+                ) for batch in batches
+            ]
+            
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    result = future.result()
+                    all_tags_data.extend(result)
+                    completed += len(result) # roughly tracking completed
+                    if progress_callback:
+                        # Report an approximation since batches complete in chunks
+                        progress_callback(min(completed, total_transactions), total_transactions)
+                except Exception as e:
+                    print(f"[TaggingService] Worker failed: {e}")
+        
+        # Bulk insert tags for massive speedup
+        new_tags = []
+        if all_tags_data:
+            from sqlalchemy import insert
+            # Bulk insert mapping
+            tag_mappings = []
+            for td in all_tags_data:
+                tag_mappings.append({
+                    "transaction_id": td["transaction_id"],
+                    "tag_type": td["tag_type"],
+                    "confidence": td["confidence"],
+                    "reason": td["reason"],
+                    "source": "auto",
+                    "is_manual": False
+                })
+            
+            # Execute bulk insert and get the inserted records to return
+            # Using core insert to be extremely fast, then we query them back
+            if tag_mappings:
+                self.db.execute(insert(Tag), tag_mappings)
+                
         self.db.commit()
         
-        # Refresh all tags to get IDs
-        for tag in new_tags:
-            self.db.refresh(tag)
+        # Retrieve the newly inserted tags to return
+        new_tags = self.db.query(Tag).filter(
+            Tag.transaction_id.in_([t.id for t in transactions]),
+            Tag.is_manual == False
+        ).all()
         
         return new_tags
     

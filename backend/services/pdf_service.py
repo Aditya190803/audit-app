@@ -13,63 +13,61 @@ class PDFService:
     
     def extract_text(self, pdf_path: str, password: Optional[str] = None,
                      progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Dict[str, Any]]:
-        """Extract text and metadata from all pages."""
+        """Extract text and metadata from all pages in parallel."""
+        import concurrent.futures
+        from backend.services.pdf_worker import _process_page_text
+        
         doc = fitz.open(pdf_path)
-        is_encrypted = doc.is_encrypted
-        if is_encrypted and password:
+        if doc.is_encrypted and password:
             doc.authenticate(password)
+        num_pages = len(doc)
+        doc.close()
         
         pages = []
-        for page_num in range(len(doc)):
-            page = doc[page_num]
-            text = page.get_text()
-            
-            # Skip slow OCR if page is encrypted without password
-            if not text.strip():
-                if is_encrypted and not password:
-                    text = "[ENCRYPTED — provide password to extract text]"
-                else:
-                    text = self._ocr_page(page)
-            
-            pages.append({
-                "page_number": page_num + 1,
-                "text": text,
-                "width": page.rect.width,
-                "height": page.rect.height
-            })
-            if progress_callback:
-                progress_callback(page_num + 1, len(doc))
+        tesseract_cmd = getattr(pytesseract.pytesseract, 'tesseract_cmd', None)
         
-        doc.close()
+        # Cap at 2 workers to avoid excessive process spawning and memory pressure
+        max_workers = min(2, max(1, os.cpu_count() or 2))
+        
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_process_page_text, pdf_path, password, i, tesseract_cmd): i for i in range(num_pages)}
+            for i, future in enumerate(concurrent.futures.as_completed(futures)):
+                try:
+                    pages.append(future.result())
+                except Exception as e:
+                    print(f"[PDFService] Error processing page text: {e}")
+                if progress_callback:
+                    progress_callback(i + 1, num_pages)
+        
+        pages.sort(key=lambda x: x["page_number"])
         return pages
-    
-    def _ocr_page(self, page: fitz.Page) -> str:
-        """OCR a page using pytesseract."""
-        try:
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-            img = Image.open(io.BytesIO(pix.tobytes("png")))
-            text = pytesseract.image_to_string(img)
-            return text
-        except Exception as e:
-            return f""
     
     def extract_tables(self, pdf_path: str, password: Optional[str] = None,
                        progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Dict[str, Any]]:
-        """Extract tables from PDF using pdfplumber."""
+        """Extract tables from PDF using pdfplumber in parallel."""
+        import concurrent.futures
+        from backend.services.pdf_worker import _process_page_tables
+        
+        doc = fitz.open(pdf_path)
+        if doc.is_encrypted and password:
+            doc.authenticate(password)
+        num_pages = len(doc)
+        doc.close()
+
         tables = []
-        try:
-            with pdfplumber.open(pdf_path, password=password) as pdf:
-                for page_num, page in enumerate(pdf.pages):
-                    page_tables = page.extract_tables()
-                    for table in page_tables:
-                        tables.append({
-                            "page_number": page_num + 1,
-                            "data": table
-                        })
-                    if progress_callback:
-                        progress_callback(page_num + 1, len(pdf.pages))
-        except Exception as e:
-            print(f"[PDFService] Table extraction failed: {e}")
+        max_workers = min(2, max(1, os.cpu_count() or 2))
+        
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_process_page_tables, pdf_path, password, i): i for i in range(num_pages)}
+            for i, future in enumerate(concurrent.futures.as_completed(futures)):
+                try:
+                    tables.extend(future.result())
+                except Exception as e:
+                    print(f"[PDFService] Error processing page tables: {e}")
+                if progress_callback:
+                    progress_callback(i + 1, num_pages)
+        
+        tables.sort(key=lambda x: x["page_number"])
         return tables
     
     def parse_transactions(self, pdf_path: str, password: Optional[str] = None, 

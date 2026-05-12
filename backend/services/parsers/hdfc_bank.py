@@ -254,7 +254,7 @@ class HDFCBankParser(BaseParser):
             if candidate and not cls._looks_like_bank_segment(candidate):
                 return cls._clean_party_candidate(candidate)
 
-        m = re.search(r"\bNEFT\s*DR-[^-]+-([^-]+)-", desc, re.IGNORECASE)
+        m = re.search(r"\bNEFT\s*DR-([^-]+)-", desc, re.IGNORECASE)
         if m:
             candidate = m.group(1).strip()
             if candidate and not cls._looks_like_bank_segment(candidate):
