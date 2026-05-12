@@ -3,7 +3,7 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 import fitz
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from sqlalchemy.orm import Session
 from backend.models import Transaction, Tag
 from backend.services.pdf_service import PDFService
@@ -97,13 +97,12 @@ class ExportService:
         return file_path
     
     def export_highlighted_pdf(self, transactions: List[Transaction], 
-                               original_pdf_path: str, 
+                               original_pdf_path: Union[str, List[str]], 
                                output_path: str,
                                password: Optional[str] = None):
         """Create a highlighted PDF with tagged transactions annotated."""
-        doc = fitz.open(original_pdf_path)
-        if doc.is_encrypted and password:
-            doc.authenticate(password)
+        pdf_paths = original_pdf_path if isinstance(original_pdf_path, list) else [original_pdf_path]
+        doc = self._open_export_document(pdf_paths, password)
         
         # Color mapping for tags
         colors = {
@@ -117,38 +116,75 @@ class ExportService:
             if not tags:
                 continue
             
-            if tx.page_number and 1 <= tx.page_number <= len(doc):
-                page = doc[tx.page_number - 1]
-                
-                search_text = tx.party_name or tx.description or ""
-                if search_text:
-                    rects = page.search_for(search_text)
-                    if rects:
-                        priority = ["client", "broker", "suspicious"]
-                        tag_type = None
-                        for p in priority:
-                            if any(t.tag_type == p for t in tags):
-                                tag_type = p
-                                break
-                        
-                        if tag_type and tag_type in colors:
-                            page_rect = page.rect
-                            margin = 50
-                            y0 = min(r.y0 for r in rects) - 2
-                            y1 = max(r.y1 for r in rects) + 2
-                            
-                            full_row_rect = fitz.Rect(
-                                margin, y0,
-                                page_rect.width - margin, y1
-                            )
-                            
-                            highlight = page.add_highlight_annot(full_row_rect)
-                            highlight.set_colors(stroke=colors[tag_type])
-                            highlight.update()
+            search_text = tx.party_name or tx.description or ""
+            if not search_text:
+                continue
+
+            page_rects = self._find_transaction_rects(doc, search_text, tx.page_number)
+            if not page_rects:
+                continue
+
+            page, rects = page_rects
+            priority = ["client", "broker", "suspicious"]
+            tag_type = None
+            for p in priority:
+                if any(t.tag_type == p for t in tags):
+                    tag_type = p
+                    break
+
+            if tag_type and tag_type in colors:
+                page_rect = page.rect
+                margin = 50
+                y0 = min(r.y0 for r in rects) - 2
+                y1 = max(r.y1 for r in rects) + 2
+
+                full_row_rect = fitz.Rect(
+                    margin, y0,
+                    page_rect.width - margin, y1
+                )
+
+                highlight = page.add_highlight_annot(full_row_rect)
+                highlight.set_colors(stroke=colors[tag_type])
+                highlight.update()
         
         doc.save(output_path)
         doc.close()
         return output_path
+
+    def _find_transaction_rects(self, doc: fitz.Document, search_text: str, page_number: Optional[int]):
+        page_indexes = []
+        if page_number and 1 <= page_number <= len(doc):
+            page_indexes.append(page_number - 1)
+        page_indexes.extend(i for i in range(len(doc)) if i not in page_indexes)
+
+        for page_index in page_indexes:
+            page = doc[page_index]
+            rects = page.search_for(search_text)
+            if rects:
+                return page, rects
+        return None
+
+    def _open_export_document(self, pdf_paths: List[str], password: Optional[str] = None) -> fitz.Document:
+        """Open one or more PDFs as a single logical document for highlighting."""
+        if len(pdf_paths) == 1:
+            doc = fitz.open(pdf_paths[0])
+            if doc.is_encrypted and password:
+                doc.authenticate(password)
+            return doc
+
+        merged = fitz.open()
+        opened_docs = []
+        try:
+            for pdf_path in pdf_paths:
+                source = fitz.open(pdf_path)
+                opened_docs.append(source)
+                if source.is_encrypted and password:
+                    source.authenticate(password)
+                merged.insert_pdf(source)
+        finally:
+            for source in opened_docs:
+                source.close()
+        return merged
     
     def export_clean_pdf_report(self, transactions: List[Transaction], 
                                 output_path: str,

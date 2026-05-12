@@ -60,7 +60,7 @@ def export_highlighted_pdf(session_id: int, file_path: Optional[str] = None, pas
     if not pdf_paths:
         raise HTTPException(status_code=404, detail="Session or PDF not found")
     export_service = ExportService(db)
-    export_service.export_highlighted_pdf(transactions, pdf_paths[0], output_path, password)
+    export_service.export_highlighted_pdf(transactions, pdf_paths, output_path, password)
     return {"file_path": output_path}
 
 @router.post("/pdf-report/{session_id}")
