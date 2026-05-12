@@ -95,7 +95,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
                 className="flex-1 accent-[var(--primary)]"
               />
               <span className="text-sm font-mono font-medium text-[var(--text-primary)] w-24 text-right">
-                ${threshold.toLocaleString()}
+                ₹{threshold.toLocaleString()}
               </span>
             </div>
           </div>
