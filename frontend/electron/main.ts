@@ -178,9 +178,16 @@ ipcMain.handle('read-example-files', async () => {
 
 ipcMain.handle('read-file-base64', async (_event, filePath: string) => {
   try {
-    const data = fs.readFileSync(filePath)
-    return { name: path.basename(filePath), data: data.toString('base64'), path: filePath }
+    // Resolve relative paths against APP_ROOT so they work regardless of CWD
+    const resolvedPath = path.isAbsolute(filePath) ? filePath : path.join(APP_ROOT, filePath)
+    if (!fs.existsSync(resolvedPath)) {
+      console.error(`[Main] PDF file not found: ${resolvedPath} (original: ${filePath})`)
+      return null
+    }
+    const data = fs.readFileSync(resolvedPath)
+    return { name: path.basename(resolvedPath), data: data.toString('base64'), path: resolvedPath }
   } catch (e) {
+    console.error(`[Main] Failed to read PDF: ${filePath}`, e)
     return null
   }
 })

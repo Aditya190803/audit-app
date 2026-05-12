@@ -124,6 +124,10 @@ class AccuracyTests(unittest.TestCase):
             fuzzy.match_broker_names("ANGEL ONE LIMITED", BROKERS)[0]["original"],
             "ANGEL ONE LIMITED",
         )
+        self.assertEqual(
+            fuzzy.match_broker_names("ANGELONELIMI-48AAAC2411230002", BROKERS)[0]["original"],
+            "ANGEL ONE LIMITED",
+        )
 
     def test_broker_matching_handles_truncated_entity_words_and_short_display_names(self):
         fuzzy = FuzzyService(0.75)
@@ -267,6 +271,91 @@ class AccuracyTests(unittest.TestCase):
         self.assertEqual(second["amount"], -6000.0)
         self.assertEqual(third["amount"], 6000.0)
         self.assertEqual(third["party_name"], "Cash Deposit")
+
+    def test_hdfc_bank_splits_repeated_upi_narrations_without_client_bleed(self):
+        parser = HDFCBankParser()
+        rows = parser._table_rows([[
+            "Date", "Narration", "Chq./Ref.No.", "ValueDt", "WithdrawalAmt.", "DepositAmt.", "ClosingBalance"
+        ], [
+            "17/02/24\n18/02/24\n18/02/24\n18/02/24\n19/02/24\n19/02/24",
+            "UPI-CAMYMEDICALSTORES-CAMYMEDICALSTORE\nS.66006877@HDFCBANK-HDFC0000001-40488739\n5759-UPI\nUPI-RAJHANS CINEMAVAPI-PAYTM-81904322@\nPAYTM-PYTM0123456-404911127011-UPI\nUPI-SABRIPETROLEUM-PAYTMQR281005050101D\nSK2EA67MI98@PAYTM-PYTM0123456-4049204135\n29-UPI\nUPI-SOLMARWINES-SOLMARWINES.68126532@HD\nFCBANK-HDFC0000001-404921179349-UPI\nCASHDEPOSITBY-SELF-CHALAROAD\nUPI-SHAHRUKHM\nMEMON-MEMONSHAHRUKH55-2@O\nKAXIS-UTIB0000459-405037380264-UPI",
+            "0000404887395759\n0000404911127011\n0000404920413529\n0000404921179349\n000000000000000\n0000405037380264",
+            "17/02/24\n18/02/24\n18/02/24\n18/02/24\n19/02/24\n19/02/24",
+            "377.00\n400.00\n1,000.00\n600.00\n20,000.00",
+            "11,000.00",
+            "220,574.76\n220,174.76\n219,174.76\n218,574.76\n229,574.76\n209,574.76",
+        ]])
+
+        self.assertEqual(len(rows), 6)
+        camy = next(row for row in rows if "CAMYMEDICALSTORES" in row[1])
+        shahrukh = next(row for row in rows if "SHAHRUKHM" in row[1])
+        cash = next(row for row in rows if "CASHDEPOSITBY" in row[1])
+
+        self.assertNotIn("SHAHRUKH", camy[1])
+        self.assertEqual(parser._extract_row(camy, None)["party_name"], "CAMYMEDICALSTORES")
+        self.assertIn("SHAHRUKH", parser._extract_row(shahrukh, 229574.76)["party_name"])
+        self.assertEqual(parser._extract_row(cash, 218574.76)["party_name"], "Cash Deposit")
+
+    def test_hdfc_bank_carries_page_boundary_narration_continuations(self):
+        parser = HDFCBankParser()
+        tables = [
+            {
+                "page_number": 4,
+                "data": [[
+                    "15/11/23",
+                    "UPI-ARTIDUBEY0974OKICICI-ARTIDUBEY0974@O",
+                    "0000331935748149",
+                    "15/11/23",
+                    "700.00",
+                    "",
+                    "268,601.47",
+                ]],
+            },
+            {
+                "page_number": 5,
+                "data": [[
+                    "15/11/23",
+                    "KICICI-CBIN0284981-331935748149-UPI\nUPI-MRSARTIARVINDDUBE-ARTIDUBEY0974@O\nKICICI-CBIN0284981-331975043880-UPI",
+                    "0000331975043880",
+                    "15/11/23",
+                    "",
+                    "1,000.00",
+                    "267,901.47",
+                ]],
+            },
+        ]
+
+        txs = parser.parse(tables, [])
+        self.assertEqual(len(txs), 2)
+        self.assertIn("331935748149", txs[0]["description"])
+        self.assertIn("ARTIDUBEY0974OKICICI", txs[0]["party_name"])
+        self.assertNotEqual(txs[0]["party_name"], "KICICI")
+        self.assertEqual(txs[0]["page_number"], 4)
+
+    def test_hdfc_bank_splits_angel_one_compact_broker_rows(self):
+        parser = HDFCBankParser()
+        rows = parser._table_rows([[
+            "Date", "Narration", "Chq./Ref.No.", "ValueDt", "WithdrawalAmt.", "DepositAmt.", "ClosingBalance"
+        ], [
+            "23/11/23\n24/11/23\n24/11/23",
+            "UPI-JAGATKUMARSINGH-JAGATKUMAR1974@OKH\nDFCBANK-HDFC0000322-332760569139-UPI\nANGELONELIMI-48AAAC2411230002\nUPI-JIOPREPAIDRECHARGE-PAYTM-JIOMOBILI\nTY@PAYTM-PYTM0123456-332886991367-UPI",
+            "0000332760569139\n0000311242906232\n0000332886991367",
+            "23/11/23\n24/11/23\n24/11/23",
+            "199.00",
+            "1,000.00\n208.40",
+            "273,349.47\n273,557.87\n273,358.87",
+        ]])
+
+        self.assertEqual(len(rows), 3)
+        angel_row = rows[1]
+        angel_tx = parser._extract_row(angel_row, 273349.47)
+        self.assertEqual(angel_tx["amount"], 208.40)
+        self.assertEqual(angel_tx["party_name"], "ANGELONELIMI")
+        self.assertEqual(
+            FuzzyService(0.75).match_broker_names(angel_tx["party_name"], BROKERS)[0]["original"],
+            "ANGEL ONE LIMITED",
+        )
+        self.assertEqual(angel_row[1], "ANGELONELIMI-48AAAC2411230002")
 
     def test_base_parser_upi_p2m_extraction(self):
         party = BaseParser._extract_party_from_description(
