@@ -9,6 +9,10 @@ export interface Transaction {
   page_number: number | null
   tags: Tag[]
   created_at: string
+  pdf_filename?: string | null
+  review_status?: string | null
+  user_notes?: string | null
+  exported_at?: string | null
 }
 
 export interface Tag {
@@ -91,6 +95,23 @@ export interface TagSummary {
   suspicious: number
   total_tagged: number
   total_transactions: number
+}
+
+export interface ParseProgress {
+  id: string
+  percent: number
+  message: string
+  stage: string
+  current_file?: number
+  total_files?: number
+  current_page?: number
+  total_pages?: number
+  transactions_found?: number
+  transactions_tagged?: number
+  transaction_count?: number
+  tag_count?: number
+  session_id?: number
+  updated_at?: number
 }
 
 export type ExportType = 'all' | 'client' | 'broker' | 'suspicious' | 'tagged'

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import { deleteSession as deleteSessionApi, getSessions, getTagSummary, getTransactions, parseFiles } from '../lib/api'
-import type { Transaction, AuditSession, TagSummary } from '../types/api'
+import { deleteSession as deleteSessionApi, getParseProgress, getSessions, getTagSummary, getTransactions, parseFiles } from '../lib/api'
+import type { Transaction, AuditSession, TagSummary, ParseProgress } from '../types/api'
 
 interface SessionState {
   sessions: AuditSession[]
@@ -9,6 +9,7 @@ interface SessionState {
   tagSummary: TagSummary | null
   isLoading: boolean
   isProcessing: boolean
+  processingProgress: ParseProgress | null
   processingError: string | null
   clearProcessingError: () => void
   loadSessions: () => Promise<void>
@@ -39,6 +40,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   tagSummary: null,
   isLoading: false,
   isProcessing: false,
+  processingProgress: null,
   processingError: null,
   clearProcessingError: () => set({ processingError: null }),
   loadSessions: async () => {
@@ -77,22 +79,60 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
   processFiles: async (pdfFiles, clientList, threshold, options) => {
-    set({ isProcessing: true })
+    const progressId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+    let pollTimer: ReturnType<typeof setInterval> | null = null
+    const pollProgress = async () => {
+      try {
+        const progress = await getParseProgress(progressId)
+        set({ processingProgress: progress.data })
+      } catch (e) {
+        console.error('Failed to poll audit progress:', e)
+      }
+    }
+
+    set({
+      isProcessing: true,
+      processingError: null,
+      processingProgress: {
+        id: progressId,
+        percent: 0,
+        message: 'Starting audit...',
+        stage: 'queued'
+      }
+    })
+    pollTimer = setInterval(pollProgress, 750)
     try {
       const pdfArr = Array.isArray(pdfFiles) ? pdfFiles : [pdfFiles]
-      const res = await parseFiles(pdfArr, clientList, threshold, options)
+      const res = await parseFiles(pdfArr, clientList, threshold, { ...options, progressId })
       const sessionId = res.data.session_id
+      await pollProgress()
       await get().loadSessions()
       const session = get().sessions.find((s) => s.id === sessionId)
       if (session) {
         get().setCurrentSession(session)
       }
-      set({ isProcessing: false })
+      if (pollTimer) clearInterval(pollTimer)
+      set((state) => ({
+        isProcessing: false,
+        processingProgress: state.processingProgress
+          ? { ...state.processingProgress, percent: 100, stage: 'complete', message: 'Audit ready.' }
+          : null
+      }))
       return sessionId
     } catch (e: any) {
       console.error('Failed to process files:', e)
+      if (pollTimer) clearInterval(pollTimer)
       const msg = e?.response?.data?.detail || e?.message || 'Processing failed. Check the PDF is valid and not encrypted.'
-      set({ isProcessing: false, processingError: msg })
+      set((state) => ({
+        isProcessing: false,
+        processingError: msg,
+        processingProgress: state.processingProgress
+          ? { ...state.processingProgress, stage: 'error', message: msg }
+          : null
+      }))
       return null
     }
   },
