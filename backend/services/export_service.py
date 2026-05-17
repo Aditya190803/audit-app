@@ -151,8 +151,8 @@ class ExportService:
                 if cell.value:
                     try:
                         max_length = max(max_length, len(str(cell.value)))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"[ExportService] Error calculating column width: {e}")
             adjusted_width = min(max_length + 2, 50)
             ws.column_dimensions[column].width = adjusted_width
 
