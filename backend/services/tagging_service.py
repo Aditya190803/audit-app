@@ -184,21 +184,22 @@ class TaggingService:
         total_transactions = len(transactions)
         
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
+            batch_sizes = {i: len(b) for i, b in enumerate(batches)}
+            futures = {
                 executor.submit(
                     _process_transaction_batch, 
                     batch, clients, phone_map, broker_names, alias_list, alias_to_canonical,
                     suspicious_threshold, fuzzy_threshold, exclusions, common_words, recurring_map, suspicious_keywords
-                ) for batch in batches
-            ]
+                ): i for i, batch in enumerate(batches)
+            }
             
             for future in concurrent.futures.as_completed(futures):
                 try:
+                    batch_idx = futures[future]
                     result = future.result()
                     all_tags_data.extend(result)
-                    completed += len(result) # roughly tracking completed
+                    completed += batch_sizes[batch_idx]
                     if progress_callback:
-                        # Report an approximation since batches complete in chunks
                         progress_callback(min(completed, total_transactions), total_transactions)
                 except Exception as e:
                     print(f"[TaggingService] Worker failed: {e}")
@@ -273,12 +274,7 @@ class TaggingService:
                        reason: str = "", confidence: float = 1.0,
                        source: str = "manual", is_manual: bool = True,
                        commit: bool = True) -> Tag:
-        """Add a manual tag to a transaction. Removes all existing tags first (single-tag model)."""
-        # Remove ALL existing tags (both auto and manual) to prevent duplicates
-        self.db.query(Tag).filter(
-            Tag.transaction_id == transaction_id
-        ).delete(synchronize_session=False)
-        
+        """Add a manual tag to a transaction."""
         tag = Tag(
             transaction_id=transaction_id,
             tag_type=tag_type,

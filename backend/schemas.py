@@ -174,7 +174,7 @@ class MatchResult(BaseModel):
 class ExportRequest(BaseModel):
     session_id: int
     export_type: str  # all, client, broker, suspicious, tagged, filtered
-    format: str  # csv, excel
+    format: str  # excel, pdf-highlight
     filter_tags: Optional[List[TagType]] = None
     file_path: Optional[str] = None
 

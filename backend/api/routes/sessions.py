@@ -50,7 +50,7 @@ def delete_session(session_id: int, db: Session = Depends(get_db)):
         return {"message": "Session deleted"}
     raise HTTPException(status_code=404, detail="Session not found")
 
-@router.get("/{session_id}/recovery")
+@router.get("/recovery")
 def get_recovery_session(db: Session = Depends(get_db)):
     service = SessionService(db)
     session = service.get_crash_recovery_session()

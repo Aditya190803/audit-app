@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react'
-import { Users, Building2, AlertTriangle, HelpCircle, ChevronRight, ChevronDown, Search } from 'lucide-react'
-import type { AuditAnalytics } from '../utils/auditAnalytics'
+import { Users, Building2, AlertTriangle, HelpCircle, ChevronRight, ChevronDown, Search, Repeat, IndianRupee, ListChecks } from 'lucide-react'
+import { groupKey, getSuspiciousSubcategory, suspiciousDisplayName, type AuditAnalytics, type SuspiciousSubcategory } from '../utils/auditAnalytics'
 import type { Transaction } from '../types/api'
 import { TagBadgeList } from './TagBadge'
 
@@ -14,6 +14,7 @@ function money(v: number | null | undefined): string {
 
 interface SummaryViewProps {
   analytics: AuditAnalytics
+  suspiciousThreshold: number
   onFilterChange?: (key: string, value: string) => void
 }
 
@@ -31,6 +32,16 @@ interface GroupMeta {
   txns: Transaction[]
 }
 
+interface SuspiciousSectionMeta {
+  key: SuspiciousSubcategory
+  label: string
+  icon: React.ReactNode
+  count: number
+  debit: number
+  credit: number
+  groups: { key: string; name: string; count: number; debit: number; credit: number; txns: Transaction[] }[]
+}
+
 function buildGroups(analytics: AuditAnalytics): GroupMeta[] {
   const all = analytics.filteredTransactions
   const client = all.filter((t) => t.tags.some((tag) => tag.tag_type === 'client'))
@@ -46,7 +57,7 @@ function buildGroups(analytics: AuditAnalytics): GroupMeta[] {
       color: 'var(--success)',
       bg: 'var(--success-subtle)',
       count: client.length,
-      debit: client.reduce((s, t) => s + Math.min((t.amount ?? 0), 0), 0),
+      debit: client.reduce((s, t) => s + Math.abs(Math.min((t.amount ?? 0), 0)), 0),
       credit: client.reduce((s, t) => s + Math.max((t.amount ?? 0), 0), 0),
       txns: client,
     },
@@ -57,7 +68,7 @@ function buildGroups(analytics: AuditAnalytics): GroupMeta[] {
       color: 'var(--warning)',
       bg: 'var(--warning-subtle)',
       count: broker.length,
-      debit: broker.reduce((s, t) => s + Math.min((t.amount ?? 0), 0), 0),
+      debit: broker.reduce((s, t) => s + Math.abs(Math.min((t.amount ?? 0), 0)), 0),
       credit: broker.reduce((s, t) => s + Math.max((t.amount ?? 0), 0), 0),
       txns: broker,
     },
@@ -68,7 +79,7 @@ function buildGroups(analytics: AuditAnalytics): GroupMeta[] {
       color: 'var(--danger)',
       bg: 'var(--danger-subtle)',
       count: suspicious.length,
-      debit: suspicious.reduce((s, t) => s + Math.min((t.amount ?? 0), 0), 0),
+      debit: suspicious.reduce((s, t) => s + Math.abs(Math.min((t.amount ?? 0), 0)), 0),
       credit: suspicious.reduce((s, t) => s + Math.max((t.amount ?? 0), 0), 0),
       txns: suspicious,
     },
@@ -79,7 +90,7 @@ function buildGroups(analytics: AuditAnalytics): GroupMeta[] {
       color: 'var(--text-tertiary)',
       bg: 'var(--surface-hover)',
       count: untagged.length,
-      debit: untagged.reduce((s, t) => s + Math.min((t.amount ?? 0), 0), 0),
+      debit: untagged.reduce((s, t) => s + Math.abs(Math.min((t.amount ?? 0), 0)), 0),
       credit: untagged.reduce((s, t) => s + Math.max((t.amount ?? 0), 0), 0),
       txns: untagged,
     },
@@ -91,7 +102,48 @@ function txDisplayName(tx: Transaction): string {
   return tx.description || tx.raw_text || tx.party_name || tx.date || `#${tx.id}`
 }
 
-export const SummaryView: React.FC<SummaryViewProps> = ({ analytics, onFilterChange }) => {
+function summarizeTransactions(txns: Transaction[]) {
+  return {
+    count: txns.length,
+    debit: txns.reduce((s, t) => s + Math.abs(Math.min((t.amount ?? 0), 0)), 0),
+    credit: txns.reduce((s, t) => s + Math.max((t.amount ?? 0), 0), 0),
+  }
+}
+
+function buildSuspiciousSections(txns: Transaction[], suspiciousThreshold: number): SuspiciousSectionMeta[] {
+  const meta: Record<SuspiciousSubcategory, { label: string; icon: React.ReactNode }> = {
+    recurring: { label: 'Recurring', icon: <Repeat className="h-3.5 w-3.5" strokeWidth={1.5} /> },
+    high_value: { label: 'High value', icon: <IndianRupee className="h-3.5 w-3.5" strokeWidth={1.5} /> },
+    other: { label: 'Other suspicious', icon: <ListChecks className="h-3.5 w-3.5" strokeWidth={1.5} /> },
+  }
+
+  return (['recurring', 'high_value', 'other'] as SuspiciousSubcategory[]).map((key) => {
+    const sectionTxns = txns.filter((tx) => getSuspiciousSubcategory(tx, suspiciousThreshold) === key)
+    const grouped = new Map<string, { key: string; name: string; count: number; debit: number; credit: number; txns: Transaction[] }>()
+
+    for (const tx of sectionTxns) {
+      const name = suspiciousDisplayName(tx)
+      const mapKey = groupKey(name)
+      const entry = grouped.get(mapKey) ?? { key: mapKey, name, count: 0, debit: 0, credit: 0, txns: [] }
+      entry.count += 1
+      if ((tx.amount ?? 0) < 0) entry.debit += Math.abs(tx.amount ?? 0)
+      if ((tx.amount ?? 0) > 0) entry.credit += tx.amount ?? 0
+      entry.txns.push(tx)
+      grouped.set(mapKey, entry)
+    }
+
+    const totals = summarizeTransactions(sectionTxns)
+    return {
+      key,
+      label: meta[key].label,
+      icon: meta[key].icon,
+      ...totals,
+      groups: Array.from(grouped.values()).sort((a, b) => b.count - a.count || (b.debit + b.credit) - (a.debit + a.credit)),
+    }
+  })
+}
+
+export const SummaryView: React.FC<SummaryViewProps> = ({ analytics, suspiciousThreshold, onFilterChange }) => {
   const groups = useMemo(() => buildGroups(analytics), [analytics])
   const [expanded, setExpanded] = useState<GroupKey | null>(null)
   const [groupSearch, setGroupSearch] = useState('')
@@ -184,6 +236,13 @@ export const SummaryView: React.FC<SummaryViewProps> = ({ analytics, onFilterCha
                 )}
               </button>
 
+              {isOpen && group.key === 'suspicious' && (
+                <SuspiciousBreakdown
+                  sections={buildSuspiciousSections(group.txns, suspiciousThreshold)}
+                  onFilterChange={onFilterChange}
+                />
+              )}
+
               {/* Expanded transactions */}
               {isOpen && (
                 <div className="border-t border-[var(--border)]">
@@ -235,6 +294,58 @@ export const SummaryView: React.FC<SummaryViewProps> = ({ analytics, onFilterCha
             </div>
           )
         })}
+      </div>
+    </div>
+  )
+}
+
+function SuspiciousBreakdown({
+  sections,
+  onFilterChange,
+}: {
+  sections: SuspiciousSectionMeta[]
+  onFilterChange?: (key: string, value: string) => void
+}) {
+  return (
+    <div className="border-t border-[var(--border)] bg-[var(--bg)] px-4 py-3 space-y-2">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+        {sections.map((section) => (
+          <div key={section.key} className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] overflow-hidden">
+            <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-[var(--border)]">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-[var(--danger)]">{section.icon}</span>
+                <span className="text-xs font-semibold text-[var(--text-primary)] truncate">{section.label}</span>
+              </div>
+              <span className="text-[10px] font-mono text-[var(--text-tertiary)] shrink-0">{section.count}</span>
+            </div>
+            <div className="max-h-52 overflow-y-auto">
+              {section.groups.length === 0 ? (
+                <div className="px-3 py-4 text-xs text-[var(--text-tertiary)]">No transactions</div>
+              ) : (
+                section.groups.map((group) => (
+                  <button
+                    key={group.key}
+                    onClick={() => {
+                      if (section.key === 'recurring') {
+                        onFilterChange?.('partyName', group.key)
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-left border-b border-[var(--border)] last:border-b-0 hover:bg-[var(--surface-hover)] transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-[var(--text-primary)] truncate">{group.name}</span>
+                      <span className="text-[10px] font-mono text-[var(--text-tertiary)] shrink-0">{group.count} txns</span>
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-2 text-[10px] font-mono">
+                      <span className="text-[var(--danger)]">{money(-group.debit)} debit</span>
+                      <span className="text-[var(--success)]">{money(group.credit)} credit</span>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )

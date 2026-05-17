@@ -3,6 +3,7 @@ import type { Transaction } from '../types/api'
 export type ReviewView = 'dashboard' | 'exceptions' | 'summary'
 export type AmountDirection = 'all' | 'debit' | 'credit'
 export type AmountType = 'all' | 'round' | 'high_value'
+export type SuspiciousSubcategory = 'recurring' | 'high_value' | 'other'
 export type TagSourceFilter = 'all' | 'manual' | 'auto'
 export type TagConfidenceFilter = 'all' | 'low' | 'high'
 export type ExceptionFilter = 'none' | 'untagged' | 'repeat' | 'high_value' | 'low_confidence' | 'missing_party' | 'cash' | 'same_day' | 'weekend' | 'round_amount'
@@ -104,6 +105,11 @@ export interface AuditAnalytics {
   topClients: { name: string; debit: number; credit: number; count: number }[]
   topParties: { name: string; debit: number; credit: number; count: number }[]
   tagDistribution: { client: number; broker: number; suspicious: number; untagged: number }
+  suspiciousSubcategories: {
+    recurring: AuditGroup[]
+    highValue: AuditGroup[]
+    other: AuditGroup[]
+  }
 }
 
 export const EMPTY_AUDIT_ANALYTICS: AuditAnalytics = {
@@ -119,7 +125,8 @@ export const EMPTY_AUDIT_ANALYTICS: AuditAnalytics = {
   paymentMethods: [],
   topClients: [],
   topParties: [],
-  tagDistribution: { client: 0, broker: 0, suspicious: 0, untagged: 0 }
+  tagDistribution: { client: 0, broker: 0, suspicious: 0, untagged: 0 },
+  suspiciousSubcategories: { recurring: [], highValue: [], other: [] },
 }
 
 export const DEFAULT_ADVANCED_FILTERS: AdvancedFilters = {
@@ -212,6 +219,10 @@ function amountAbs(tx: Transaction): number {
 
 function primaryTag(tx: Transaction) {
   return tx.tags?.[0] ?? null
+}
+
+function suspiciousTag(tx: Transaction) {
+  return tx.tags.find((tag) => tag.tag_type === 'suspicious') ?? null
 }
 
 function isLowConfidence(tx: Transaction): boolean {
@@ -320,6 +331,18 @@ export function partyDisplayName(tx: Transaction): string {
     if (matched) return matched
   }
   return tx.party_name || tx.description || 'Unknown'
+}
+
+export function suspiciousDisplayName(tx: Transaction): string {
+  return partyDisplayName(tx)
+}
+
+export function getSuspiciousSubcategory(tx: Transaction, suspiciousThreshold: number): SuspiciousSubcategory {
+  const tag = suspiciousTag(tx)
+  const reason = tag?.reason?.toLowerCase() || ''
+  if (reason.includes('recurring')) return 'recurring'
+  if (amountAbs(tx) >= suspiciousThreshold || reason.includes('exceeds threshold')) return 'high_value'
+  return 'other'
 }
 
 function makeGroup(name: string): AuditGroup {
@@ -630,6 +653,22 @@ export function buildAuditAnalytics(
     untagged: filteredTransactions.filter((tx) => tx.tags.length === 0).length,
   }
 
+  const suspiciousTransactions = filteredTransactions.filter((tx) => tx.tags.some((t) => t.tag_type === 'suspicious'))
+  const suspiciousSubcategories = {
+    recurring: grouped(
+      suspiciousTransactions.filter((tx) => getSuspiciousSubcategory(tx, suspiciousThreshold) === 'recurring'),
+      suspiciousDisplayName
+    ),
+    highValue: grouped(
+      suspiciousTransactions.filter((tx) => getSuspiciousSubcategory(tx, suspiciousThreshold) === 'high_value'),
+      suspiciousDisplayName
+    ),
+    other: grouped(
+      suspiciousTransactions.filter((tx) => getSuspiciousSubcategory(tx, suspiciousThreshold) === 'other'),
+      suspiciousDisplayName
+    ),
+  }
+
   return {
     filteredTransactions,
     clientGroups,
@@ -642,6 +681,7 @@ export function buildAuditAnalytics(
     topClients,
     topParties,
     tagDistribution,
+    suspiciousSubcategories,
   }
 }
 

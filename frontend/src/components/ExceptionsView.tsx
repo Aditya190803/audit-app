@@ -41,7 +41,7 @@ const SEVERITY_GROUPS: {
     color: 'var(--warning)',
     bg: 'var(--warning-subtle)',
     items: [
-      { key: 'repeat', label: 'Repeat Parties', desc: 'Multiple transactions with same party', icon: <Repeat className="h-3.5 w-3.5" strokeWidth={1.5} />, getCount: (a) => a.exceptions.repeat },
+      { key: 'repeat', label: 'Repeat Parties', desc: 'Multiple same-party transactions', icon: <Repeat className="h-3.5 w-3.5" strokeWidth={1.5} />, getCount: (a) => a.exceptions.repeat },
       { key: 'same_day', label: 'Same-Day Duplicates', desc: 'Same party, same date', icon: <Calendar className="h-3.5 w-3.5" strokeWidth={1.5} />, getCount: (a) => a.exceptions.sameDay },
       { key: 'cash', label: 'Cash Transactions', desc: 'Cash mentions in description', icon: <CreditCard className="h-3.5 w-3.5" strokeWidth={1.5} />, getCount: (a) => a.exceptions.cash },
       { key: 'weekend', label: 'Weekend Activity', desc: 'Transactions on Sat/Sun', icon: <Calendar className="h-3.5 w-3.5" strokeWidth={1.5} />, getCount: (a) => a.exceptions.weekend },
@@ -67,17 +67,12 @@ export const ExceptionsView: React.FC<ExceptionsViewProps> = ({
 }) => {
   const totalExceptions = Object.values(analytics.exceptions).reduce((a, b) => a + b, 0)
 
-  const handleClick = (key: ExceptionFilter) => {
-    onFilterChange('exception', key)
-  }
-
   return (
-    <div className="px-3 pb-3 space-y-3">
-      {/* Overall bar */}
+    <div className="space-y-4 animate-fade-in-up">
       <div className="flex items-center gap-3 text-xs text-[var(--text-secondary)]">
-        <span className="font-medium">{totalExceptions} exceptions found</span>
-        <span className="opacity-30">|</span>
-        <span>Click any card to filter transactions</span>
+        <span className="font-semibold">{totalExceptions} exceptions found</span>
+        <span className="text-[var(--border-strong)]">·</span>
+        <span>Select a category to filter matching transactions</span>
       </div>
 
       {SEVERITY_GROUPS.map((group) => {
@@ -86,14 +81,15 @@ export const ExceptionsView: React.FC<ExceptionsViewProps> = ({
           <div key={group.key} className="space-y-2">
             <div className="flex items-center gap-2">
               <div
-                className="flex items-center gap-1.5 px-2 py-0.5 rounded-[var(--radius-sm)] text-xs font-medium"
+                className="badge text-xs"
                 style={{ color: group.color, backgroundColor: group.bg }}
               >
                 {group.icon}
                 {group.label}
               </div>
-              <span className="text-[11px] text-[var(--text-tertiary)]">{groupTotal} items</span>
+              <span className="text-[11px] text-[var(--text-tertiary)] font-mono">{groupTotal} items</span>
             </div>
+
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
               {group.items.map((item) => {
                 const count = item.getCount(analytics)
@@ -101,25 +97,23 @@ export const ExceptionsView: React.FC<ExceptionsViewProps> = ({
                 return (
                   <button
                     key={item.key}
-                    onClick={() => handleClick(item.key)}
-                    className="group relative overflow-hidden text-left p-3 bg-white border border-[var(--border)] rounded-[var(--radius-md)] hover:border-[var(--border-strong)] hover:shadow-sm transition-all duration-150 cursor-pointer"
+                    onClick={() => onFilterChange('exception', item.key)}
+                    className="card card-hover text-left p-3.5 relative overflow-hidden group"
                   >
-                    <div className="absolute top-0 left-0 w-1 h-full" style={{ backgroundColor: group.color, opacity: 0.6 }} />
+                    <div className="absolute top-0 left-0 w-1 h-full rounded-r" style={{ backgroundColor: group.color, opacity: 0.6 }} />
                     <div className="pl-2">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
                           <span style={{ color: group.color }}>{item.icon}</span>
-                          <span className="text-[11px] text-[var(--text-secondary)]">{item.label}</span>
+                          <span className="text-[11px] font-medium text-[var(--text-secondary)]">{item.label}</span>
                         </div>
-                        <span className="text-[10px] text-[var(--text-tertiary)]">{pct}%</span>
+                        <span className="text-[10px] text-[var(--text-tertiary)] font-mono">{pct}%</span>
                       </div>
-                      <div className="text-lg font-semibold font-mono text-[var(--text-primary)] mt-0.5">
-                        {count}
-                      </div>
+                      <div className="stat-value mt-1 text-lg">{count}</div>
                       <div className="text-[10px] text-[var(--text-tertiary)] mt-0.5">{item.desc}</div>
-                      <div className="w-full h-1 bg-[var(--bg)] rounded-full mt-1.5 overflow-hidden">
+                      <div className="w-full h-1 bg-[var(--bg-raised)] rounded-full mt-2 overflow-hidden">
                         <div
-                          className="h-full rounded-full transition-all duration-300"
+                          className="h-full rounded-full transition-all duration-500"
                           style={{
                             width: `${Math.max(pct, 4)}%`,
                             backgroundColor: group.color,

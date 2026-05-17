@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -10,10 +10,13 @@ from backend.services.csv_service import CSVService
 from backend.services.tagging_service import TaggingService
 from backend.services.config_service import ConfigService
 from backend.services.audit_service import AuditService
+from backend.services.payment_method import detect_payment_method
 import os
 import shutil
 import json
 import time
+import uuid
+from pathlib import Path
 from threading import Lock
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
@@ -21,23 +24,36 @@ router = APIRouter(prefix="/transactions", tags=["transactions"])
 _progress_lock = Lock()
 _parse_progress = {}
 
+PROGRESS_TTL = 3600  # 1 hour
+
 def _set_parse_progress(progress_id: Optional[str], percent: int, message: str, stage: str = "processing", **extra):
     if not progress_id:
         return
+    now = time.time()
     payload = {
         "id": progress_id,
         "percent": max(0, min(100, int(percent))),
         "message": message,
         "stage": stage,
-        "updated_at": time.time(),
+        "updated_at": now,
         **extra,
     }
     with _progress_lock:
         _parse_progress[progress_id] = payload
+        _cleanup_stale_progress(now)
 
 def _get_parse_progress(progress_id: str):
     with _progress_lock:
-        return _parse_progress.get(progress_id)
+        entry = _parse_progress.get(progress_id)
+        if entry and entry.get("stage") in ("complete", "error"):
+            del _parse_progress[progress_id]
+        return entry
+
+def _cleanup_stale_progress(now: float):
+    stale = [pid for pid, entry in _parse_progress.items()
+             if now - entry.get("updated_at", 0) > PROGRESS_TTL]
+    for pid in stale:
+        del _parse_progress[pid]
 
 @router.get("/parse-progress/{progress_id}")
 def get_parse_progress(progress_id: str):
@@ -71,7 +87,6 @@ async def parse_files(
     name_column: Optional[str] = Form(None),
     excluded_brokers: Optional[str] = Form(None),
     ap_codes: Optional[str] = Form(None),
-    bank_profile_id: Optional[int] = Form(None),
     bank_name: Optional[str] = Form(None),
     progress_id: Optional[str] = Form(None),
     db: Session = Depends(get_db)
@@ -91,11 +106,17 @@ async def parse_files(
     upload_dir = os.path.abspath("uploads")
     os.makedirs(upload_dir, exist_ok=True)
     
+    def safe_save(upload_file: UploadFile) -> str:
+        safe_name = Path(upload_file.filename or "file").name
+        ext = Path(safe_name).suffix
+        unique_name = f"{uuid.uuid4().hex}{ext}"
+        dest = os.path.join(upload_dir, unique_name)
+        with open(dest, "wb") as f:
+            shutil.copyfileobj(upload_file.file, f)
+        return os.path.abspath(dest)
+    
     # Save client list
-    client_list_path = os.path.join(upload_dir, client_list.filename)
-    with open(client_list_path, "wb") as f:
-        shutil.copyfileobj(client_list.file, f)
-    client_list_path = os.path.abspath(client_list_path)
+    client_list_path = safe_save(client_list)
     _set_parse_progress(progress_id, 5, "Reading client list...", "client_list")
     
     # Parse client list (CSV or Excel)
@@ -112,29 +133,29 @@ async def parse_files(
     if excluded_brokers:
         try:
             excluded = json.loads(excluded_brokers)
-            if excluded:
-                excluded_set = set(e.strip().lower() for e in excluded)
-                def _get_broker_name(client: dict) -> str:
-                    raw = client.get('raw_data', {})
-                    if not isinstance(raw, dict):
-                        return ''
-                    for key, val in raw.items():
-                        k = str(key).lower().strip()
-                        if k in ('broker', 'broker_name', 'brokername', 'source', 'dp name', 'dpname', 'depository participant'):
-                            return str(val).strip()
+        except (json.JSONDecodeError, TypeError) as e:
+            raise HTTPException(status_code=400, detail=f"Invalid excluded_brokers JSON: {e}")
+        if excluded:
+            excluded_set = set(e.strip().lower() for e in excluded)
+            def _get_broker_name(client: dict) -> str:
+                raw = client.get('raw_data', {})
+                if not isinstance(raw, dict):
                     return ''
-                clients = [c for c in clients if _get_broker_name(c).lower() not in excluded_set]
-        except Exception:
-            pass
+                for key, val in raw.items():
+                    k = str(key).lower().strip()
+                    if k in ('broker', 'broker_name', 'brokername', 'source', 'dp name', 'dpname', 'depository participant'):
+                        return str(val).strip()
+                return ''
+            clients = [c for c in clients if _get_broker_name(c).lower() not in excluded_set]
 
     # Filter by selected AP codes if provided
     if ap_codes:
         try:
             selected = json.loads(ap_codes)
-            if selected:
-                clients = csv_service.filter_clients_by_ap_codes(clients, selected)
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError) as e:
+            raise HTTPException(status_code=400, detail=f"Invalid ap_codes JSON: {e}")
+        if selected:
+            clients = csv_service.filter_clients_by_ap_codes(clients, selected)
     
     # Parse all PDFs and combine transactions
     pdf_service = PDFService()
@@ -144,7 +165,7 @@ async def parse_files(
     
     for pdf_file in pdf:
         file_index = len(pdf_paths) + 1
-        pdf_path = os.path.join(upload_dir, pdf_file.filename)
+        pdf_path = safe_save(pdf_file)
         _set_parse_progress(
             progress_id,
             12 + int((file_index - 1) / max(len(pdf), 1) * 48),
@@ -153,8 +174,6 @@ async def parse_files(
             current_file=file_index,
             total_files=len(pdf),
         )
-        with open(pdf_path, "wb") as f:
-            shutil.copyfileobj(pdf_file.file, f)
         pdf_paths.append(pdf_path)
         _set_parse_progress(
             progress_id,
@@ -188,27 +207,7 @@ async def parse_files(
             if tx.get("page_number"):
                 tx["page_number"] += page_offset
             tx["pdf_filename"] = pdf_file.filename
-            # Detect payment method from description
-            desc = (tx.get("description") or "") + " " + (tx.get("party_name") or "")
-            methods = {
-                "NEFT": r'\bNEFT\b',
-                "RTGS": r'\bRTGS\b',
-                "IMPS": r'\bIMPS\b',
-                "UPI": r'\bUPI\b',
-                "CASH": r'\bCASH\b',
-                "CHEQUE": r'\bCHEQUE\b|\bCHQ\b|\bCH\.?\b',
-                "ECS": r'\bECS\b',
-                "ATM": r'\bATM\b',
-                "POS": r'\bPOS\b',
-                "SWIFT": r'\bSWIFT\b',
-            }
-            import re
-            detected = "OTHER"
-            for method, pattern in methods.items():
-                if re.search(pattern, desc, re.IGNORECASE):
-                    detected = method
-                    break
-            tx["payment_method"] = detected
+            tx["payment_method"] = detect_payment_method(tx.get("description"), tx.get("party_name"))
         all_transactions.extend(txns)
         page_offset += await run_in_threadpool(pdf_service.get_page_count, pdf_path, pdf_passwords.get(pdf_file.filename, password or ""))
         _set_parse_progress(
@@ -286,7 +285,7 @@ def get_tag_summary(session_id: int, db: Session = Depends(get_db)):
 @router.post("/{transaction_id}/review")
 def update_review_status(
     transaction_id: int,
-    status: str = Form(...),
+    status: str = Query(...),
     db: Session = Depends(get_db)
 ):
     """Update review status: unreviewed, reviewed, needs_review, flagged"""
@@ -299,7 +298,7 @@ def update_review_status(
 @router.post("/{transaction_id}/notes")
 def update_transaction_notes(
     transaction_id: int,
-    notes: str = Form(...),
+    notes: str = Query(...),
     db: Session = Depends(get_db)
 ):
     """Add or update user notes on a transaction"""

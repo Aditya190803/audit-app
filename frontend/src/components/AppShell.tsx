@@ -1,633 +1,628 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import {
-  Settings,
-  Download,
-  FileText,
-  Trash2,
-  ChevronLeft,
-  ChevronRight,
-  X,
-  AlertTriangle,
-  CheckSquare,
-  Search
+  Plus, FileText, Search, Settings, Download,
+  Trash2, MoreHorizontal, Clock, Hash, ArrowRight, PanelLeft,
+  Table2, BarChart3, AlertTriangle,
+  Edit3, Check, X, Loader2,
 } from 'lucide-react'
-
-import { useUIStore } from '../stores/uiStore'
 import { useSessionStore } from '../stores/sessionStore'
+import { useUIStore } from '../stores/uiStore'
 import { useSettingsStore } from '../stores/settingsStore'
+import { useAuditAnalyticsWorker } from '../hooks/useAuditAnalyticsWorker'
+import { EMPTY_AUDIT_ANALYTICS } from '../utils/auditAnalytics'
+import type { AdvancedFilters } from '../utils/auditAnalytics'
+import type { AuditSession } from '../types/api'
+import { deleteSession, renameSession } from '../lib/api'
+
 import { FileDropZone } from './FileDropZone'
 import { DataTable } from './DataTable'
 import { SearchFilters } from './SearchFilters'
 import { AuditReviewPage } from './AuditReviewPage'
 import { SettingsPanel } from './SettingsPanel'
 import { ExportPanel } from './ExportPanel'
-import { KeyboardShortcuts } from './KeyboardShortcuts'
 import { ToastContainer } from './Toast'
-import {
-  addTag,
-  bulkAddTags,
-  bulkRemoveTags,
-  getTags,
-  removeTag,
-  renameSession
-} from '../lib/api'
-import { DEFAULT_ADVANCED_FILTERS, EMPTY_AUDIT_ANALYTICS } from '../utils/auditAnalytics'
-import { useAuditAnalyticsWorker } from '../hooks/useAuditAnalyticsWorker'
+import { KeyboardShortcuts } from './KeyboardShortcuts'
 
-export const AppShell: React.FC = () => {
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; sessionId: number } | null>(null)
-  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null)
-  const [renameId, setRenameId] = useState<number | null>(null)
-  const [renameValue, setRenameValue] = useState('')
-  const renameInputRef = useRef<HTMLInputElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
-  const [sessionSearch, setSessionSearch] = useState('')
-  const [mainView, setMainView] = useState<'data' | 'review'>('data')
+/* ════════════════════════════════════════════════════════════════════════════
+   APP SHELL — The main orchestrator
+   ════════════════════════════════════════════════════════════════════════════ */
 
-  const closeContextMenu = useCallback(() => setContextMenu(null), [])
-
+export function AppShell() {
   const {
-    sidebarOpen,
-    settingsOpen,
-    exportOpen,
-    selectedTransactionIds,
-    searchQuery,
-    filterTags,
-    resultFilter,
-    minAmount,
-    maxAmount,
-    reviewView,
-    advancedFilters,
-    filtersExpanded,
-    toggleSidebar,
-    toggleSettings,
-    toggleExport,
-    goHome,
-    selectTransaction,
-    clearSelection,
-    setSearchQuery,
-    setFilterTags,
-    setResultFilter,
-    setReviewView,
-    setAdvancedFilter,
-    resetAdvancedFilters,
-    toggleFiltersExpanded,
-    activeFilterCount,
-  } = useUIStore()
-
-  const {
-    sessions,
-    currentSession,
-    transactions,
-    tagSummary,
-    isLoading,
-    isProcessing,
-    processingProgress,
-    processingError,
-    clearProcessingError,
-    loadSessions,
-    setCurrentSession,
-    processFiles,
-    deleteSession,
-    refreshCurrentSession
+    sessions, currentSession, transactions, isLoading,
+    loadSessions, setCurrentSession,
   } = useSessionStore()
 
-  const { settings, loadSettings } = useSettingsStore()
-  const brokers = (settings.broker_list as string[]) || []
-  const suspiciousThreshold = Number(currentSession?.settings_snapshot?.suspicious_threshold ?? settings.suspicious_threshold ?? settings.threshold ?? 50000)
+  const {
+    sidebarOpen, settingsOpen, exportOpen, showNewAudit,
+    searchQuery, filterTags, resultFilter, advancedFilters, filtersExpanded,
+    reviewView,
+    toggleSidebar, toggleSettings, toggleExport,
+    setShowNewAudit, goHome, setSearchQuery,
+    setResultFilter, setAdvancedFilter,
+    toggleFiltersExpanded, setReviewView, activeFilterCount,
+  } = useUIStore()
 
-  useEffect(() => {
-    loadSessions()
-    loadSettings()
-  }, [loadSessions, loadSettings])
+  const settings = useSettingsStore((s) => s.settings)
+  const suspiciousThreshold = (settings.suspicious_threshold as number) || 10000
 
-  // Compute filter tags for DataTable based on result filter
+  // Effective filter tags from resultFilter + manual filterTags
   const effectiveFilterTags = useMemo(() => {
     if (resultFilter === 'all') return filterTags
-    return [resultFilter, ...filterTags.filter((t) => t !== resultFilter)]
-  }, [resultFilter, filterTags])
+    if (filterTags.includes(resultFilter)) return filterTags
+    return [...filterTags, resultFilter]
+  }, [filterTags, resultFilter])
 
-  const { data: baseAnalyticsData } = useAuditAnalyticsWorker(
-    transactions, '', [], DEFAULT_ADVANCED_FILTERS, suspiciousThreshold, EMPTY_AUDIT_ANALYTICS
+  // Analytics via web worker
+  const { data: analytics, isComputing } = useAuditAnalyticsWorker(
+    transactions,
+    searchQuery,
+    effectiveFilterTags,
+    advancedFilters,
+    suspiciousThreshold,
+    EMPTY_AUDIT_ANALYTICS,
   )
-  const baseAnalytics = baseAnalyticsData || EMPTY_AUDIT_ANALYTICS
+  const resolvedAnalytics = analytics ?? EMPTY_AUDIT_ANALYTICS
 
-  const { data: auditAnalyticsData, isComputing: isAuditComputing } = useAuditAnalyticsWorker(
-    transactions, searchQuery, effectiveFilterTags, advancedFilters, suspiciousThreshold, EMPTY_AUDIT_ANALYTICS
-  )
-  const auditAnalytics = auditAnalyticsData || EMPTY_AUDIT_ANALYTICS
+  // Load sessions on mount
+  useEffect(() => { loadSessions() }, [loadSessions])
 
-  const clientOptions = useMemo(
-    () => baseAnalytics.clientGroups.map((group) => ({ key: group.key, name: group.name, count: group.count })),
-    [baseAnalytics.clientGroups]
-  )
+  // Active view
+  const [activeView, setActiveView] = useState<'data' | 'review'>('data')
 
-  const partyOptions = useMemo(
-    () => baseAnalytics.partyGroups.map((group) => ({ key: group.key, name: group.name, count: group.count })),
-    [baseAnalytics.partyGroups]
-  )
-
-  const pdfOptions = useMemo(() => {
-    const map = new Map<string, number>()
-    for (const tx of transactions) {
-      const name = tx.pdf_filename || 'Unknown'
-      map.set(name, (map.get(name) ?? 0) + 1)
+  // Handle exception filter from review page
+  const handleExceptionFilter = useCallback((key: string, value: string) => {
+    if (key === 'exception') {
+      setAdvancedFilter('exception', value as AdvancedFilters['exception'])
+    } else if (key === 'resultFilter') {
+      setResultFilter(value as any)
+    } else if (key === 'partyName') {
+      setAdvancedFilter('partyName', value)
+    } else if (key === 'clientName') {
+      setAdvancedFilter('clientName', value)
+    } else if (key === 'brokerName') {
+      setAdvancedFilter('brokerName', value)
     }
-    return Array.from(map.entries())
-      .map(([name, count]) => ({ key: name, name, count }))
-      .sort((a, b) => b.count - a.count)
-  }, [transactions])
+    setActiveView('data')
+  }, [setAdvancedFilter, setResultFilter])
 
-  const brokerOptions = useMemo(
-    () => baseAnalytics.brokerGroups.map((group) => ({ key: group.key, name: group.name, count: group.count })),
-    [baseAnalytics.brokerGroups]
+  // When user selects a session
+  const handleSessionSelect = (session: AuditSession) => {
+    setCurrentSession(session)
+    setShowNewAudit(false)
+    setActiveView('data')
+  }
+
+  const hasSession = currentSession !== null
+  const showEmptyState = !hasSession && !showNewAudit
+
+  return (
+    <div className="h-screen flex flex-col overflow-hidden bg-[var(--bg)]">
+      <div className="flex flex-1 min-h-0">
+        {/* ── Sidebar ─────────────────────────────────────── */}
+        <Sidebar
+          sessions={sessions}
+          currentSession={currentSession}
+          isOpen={sidebarOpen}
+          onToggle={toggleSidebar}
+          onSessionSelect={handleSessionSelect}
+          onNewAudit={() => { goHome(); setShowNewAudit(true) }}
+          onSettings={toggleSettings}
+          onLoadSessions={loadSessions}
+        />
+
+        {/* ── Main content area ────────────────────────────── */}
+        <main className="flex-1 flex flex-col min-w-0 min-h-0">
+          {/* Top toolbar */}
+          {hasSession && (
+            <Toolbar
+              session={currentSession!}
+              activeView={activeView}
+              onViewChange={setActiveView}
+              onExport={toggleExport}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              filterCount={activeFilterCount()}
+              onToggleFilters={toggleFiltersExpanded}
+              isComputing={isComputing}
+            />
+          )}
+
+          {/* Content */}
+          <div className="flex-1 min-h-0 flex">
+            <div className="flex-1 min-w-0 flex flex-col min-h-0">
+              {showEmptyState && (
+                <WelcomeScreen
+                  sessions={sessions}
+                  onSessionSelect={handleSessionSelect}
+                  onNewAudit={() => setShowNewAudit(true)}
+                />
+              )}
+
+              {showNewAudit && !hasSession && (
+                <div className="flex-1 overflow-y-auto p-6 animate-fade-in-up">
+                  <div className="max-w-4xl mx-auto">
+                    <FileDropZone />
+                  </div>
+                </div>
+              )}
+
+              {hasSession && activeView === 'data' && (
+                <>
+                  {filtersExpanded && (
+                    <div className="shrink-0 animate-fade-in-down">
+                      <SearchFilters
+                        analytics={resolvedAnalytics}
+                        transactions={transactions}
+                      />
+                    </div>
+                  )}
+                  <div className="flex-1 min-h-0">
+                    <DataTable
+                      analytics={resolvedAnalytics}
+                      isLoading={isLoading}
+                    />
+                  </div>
+                </>
+              )}
+
+              {hasSession && activeView === 'review' && (
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <AuditReviewPage
+                    analytics={resolvedAnalytics}
+                    activeTab={reviewView}
+                    suspiciousThreshold={suspiciousThreshold}
+                    onTabChange={setReviewView}
+                    onExceptionFilter={handleExceptionFilter}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </main>
+      </div>
+
+      {/* Modals */}
+      <SettingsPanel isOpen={settingsOpen} onClose={toggleSettings} />
+      <ExportPanel
+        isOpen={exportOpen}
+        onClose={toggleExport}
+        sessionId={currentSession?.id ?? null}
+      />
+      <ToastContainer />
+      <KeyboardShortcuts />
+    </div>
   )
+}
 
-  // Count transactions per result filter from current view
-  const filteredSessions = useMemo(() => {
-    if (!sessionSearch) return sessions
-    const q = sessionSearch.toLowerCase()
-    return sessions.filter((s) => (s.name || `Session ${s.id}`).toLowerCase().includes(q))
-  }, [sessions, sessionSearch])
 
-  const filterCounts = useMemo(() => {
-    const counts = { all: transactions.length, client: 0, broker: 0, suspicious: 0 }
-    for (const tx of transactions) {
-      const tag = tx.tags[0]?.tag_type
-      if (tag === 'client') counts.client++
-      if (tag === 'broker') counts.broker++
-      if (tag === 'suspicious') counts.suspicious++
-    }
-    return counts
-  }, [transactions])
+/* ════════════════════════════════════════════════════════════════════════════
+   SIDEBAR
+   ════════════════════════════════════════════════════════════════════════════ */
+
+function Sidebar({
+  sessions,
+  currentSession,
+  isOpen,
+  onToggle,
+  onSessionSelect,
+  onNewAudit,
+  onSettings,
+  onLoadSessions,
+}: {
+  sessions: AuditSession[]
+  currentSession: AuditSession | null
+  isOpen: boolean
+  onToggle: () => void
+  onSessionSelect: (s: AuditSession) => void
+  onNewAudit: () => void
+  onSettings: () => void
+  onLoadSessions: () => Promise<void>
+}) {
+  const [renaming, setRenaming] = useState<number | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [contextMenu, setContextMenu] = useState<{ id: number; x: number; y: number } | null>(null)
+  const contextRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!contextMenu) return
     const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        closeContextMenu()
+      if (contextRef.current && !contextRef.current.contains(e.target as Node)) {
+        setContextMenu(null)
       }
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
-  }, [contextMenu, closeContextMenu])
+  }, [])
 
-  const handleContextDelete = async () => {
-    if (!contextMenu) return
-    setDeleteConfirmId(contextMenu.sessionId)
-    closeContextMenu()
+  const handleContextMenu = (e: React.MouseEvent, id: number) => {
+    e.preventDefault()
+    setContextMenu({ id, x: e.clientX, y: e.clientY })
   }
 
-  const confirmDelete = async (sessionId: number) => {
-    await deleteSession(sessionId)
-    setDeleteConfirmId(null)
-  }
-
-  const startRename = (sessionId: number, currentName: string) => {
-    setRenameId(sessionId)
-    setRenameValue(currentName || `Session ${sessionId}`)
-    setTimeout(() => renameInputRef.current?.focus(), 50)
-  }
-
-  const commitRename = async () => {
-    if (renameId === null) return
-    const val = renameValue.trim()
-    if (val) {
-      await renameSession(renameId, val)
-      await loadSessions()
-      if (currentSession?.id === renameId) {
-        setCurrentSession({ ...currentSession, name: val })
-      }
+  const handleRename = async (id: number) => {
+    if (renameValue.trim()) {
+      await renameSession(id, renameValue.trim())
+      await onLoadSessions()
     }
-    setRenameId(null)
+    setRenaming(null)
     setRenameValue('')
   }
 
-  const handleRemoveFilterTag = useCallback((tag: string) => {
-    setFilterTags(filterTags.filter((t) => t !== tag))
-  }, [filterTags, setFilterTags])
-
-  const handleGoHome = useCallback(() => {
-    goHome()
-    setCurrentSession(null)
-  }, [goHome, setCurrentSession])
-
-  const handleNewAudit = useCallback(() => {
-    handleGoHome()
-  }, [handleGoHome])
-
-  const handleFilesSelected = async (
-    pdfFiles: File | File[],
-    clientList: File,
-    threshold: number,
-    options: {
-      password?: string
-      sheetName?: string
-      nameColumn?: string
-      excludedBrokers?: string[]
-      apCodes?: string[]
-      bankName?: string
+  const handleDelete = async (id: number) => {
+    if (confirm('Delete this audit session? This cannot be undone.')) {
+      await deleteSession(id)
+      await onLoadSessions()
     }
-  ) => {
-    const pdfArr = Array.isArray(pdfFiles) ? pdfFiles : [pdfFiles]
-    await processFiles(pdfArr, clientList, threshold, options)
+    setContextMenu(null)
   }
 
-  const handleRemoveTag = useCallback(async (tagId: number) => {
-    await removeTag(tagId)
-    await refreshCurrentSession()
-  }, [refreshCurrentSession])
+  const sorted = [...sessions].sort(
+    (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+  )
 
-  const handleAddTag = useCallback(async (transactionId: number, tagType: string) => {
-    const { pushToast } = useUIStore.getState()
-    const existing = await getTags(transactionId)
-    const prevTags = existing.data.map((t) => ({ id: t.id, tag_type: t.tag_type, source: t.source, is_manual: t.is_manual, reason: t.reason }))
-    const existingIds = prevTags.map((t) => t.id)
-    if (existingIds.length > 0) {
-      await bulkRemoveTags(existingIds)
-    }
-    await addTag(transactionId, tagType)
-    await refreshCurrentSession()
-    pushToast({
-      message: `Tagged as ${tagType}`,
-      action: {
-        label: 'Undo',
-        onClick: async () => {
-          const current = await getTags(transactionId)
-          const currentIds = current.data.map((t) => t.id)
-          if (currentIds.length > 0) await bulkRemoveTags(currentIds)
-          for (const pt of prevTags) {
-            await addTag(transactionId, pt.tag_type, pt.reason ?? undefined, undefined, pt.source, pt.is_manual)
-          }
-          await refreshCurrentSession()
-        }
-      }
-    })
-  }, [refreshCurrentSession])
-
-  const handleBulkTag = useCallback(async (tagType: string) => {
-    if (selectedTransactionIds.length === 0) return
-    await bulkAddTags(selectedTransactionIds, tagType)
-    clearSelection()
-    await refreshCurrentSession()
-  }, [selectedTransactionIds, clearSelection, refreshCurrentSession])
-
-  const handleSelectTransaction = useCallback((id: number, multi?: boolean) => {
-    selectTransaction(id, multi)
-  }, [selectTransaction])
+  if (!isOpen) {
+    return (
+      <div className="w-[var(--sidebar-collapsed)] bg-[var(--surface)] border-r border-[var(--border)] flex flex-col items-center py-3 gap-2 shrink-0">
+        <button
+          onClick={onToggle}
+          className="btn-icon"
+          title="Expand sidebar"
+        >
+          <PanelLeft className="h-4 w-4" strokeWidth={1.5} />
+        </button>
+        <div className="w-8 h-px bg-[var(--border)] my-1" />
+        <button onClick={onNewAudit} className="btn-icon" title="New audit">
+          <Plus className="h-4 w-4" strokeWidth={2} />
+        </button>
+        <div className="flex-1" />
+        <button onClick={onSettings} className="btn-icon" title="Settings">
+          <Settings className="h-4 w-4" strokeWidth={1.5} />
+        </button>
+      </div>
+    )
+  }
 
   return (
-    <div className="h-full flex bg-[var(--bg)]">
-      <KeyboardShortcuts />
-      <ToastContainer />
-
-      {/* Sidebar */}
-      <aside
-        className={`shrink-0 bg-[var(--surface)] border-r border-[var(--border)] flex flex-col transition-[width] duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-          sidebarOpen ? 'w-[var(--sidebar-width)]' : 'w-0 overflow-hidden'
-        }`}
-      >
-        {/* Brand */}
-        <button onClick={handleGoHome} className="h-[var(--header-height)] px-4 flex items-center gap-2.5 border-b border-[var(--border)] hover:bg-[var(--surface-hover)] transition-colors duration-150 w-full text-left">
-          <div className="h-7 w-7 rounded-[var(--radius-md)] bg-[var(--navy-brand)] flex items-center justify-center shrink-0">
-            <span className="text-[10px] font-semibold text-white tracking-wide">SKA</span>
-          </div>
-          <div className="flex flex-col leading-none">
-            <span className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">Bank Audit</span>
-            <span className="text-[10px] text-[var(--text-tertiary)] mt-0.5">Shah Kapadia &amp; Associates</span>
-          </div>
-        </button>
-
-        <div className="p-2 border-b border-[var(--border)]">
-          <button
-            onClick={handleNewAudit}
-            className="flex items-center gap-2 w-full px-2.5 py-1.5 text-sm font-medium text-[var(--primary)] hover:bg-[var(--primary-subtle)] rounded-[var(--radius-md)] transition-colors duration-150"
-          >
-            <svg className="h-4 w-4" strokeWidth={2} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            New Audit
+    <div
+      className="w-[var(--sidebar-width)] bg-[var(--surface)] border-r border-[var(--border)] flex flex-col shrink-0 animate-slide-in-left"
+      style={{ animationDuration: '0.15s' }}
+    >
+      {/* Sidebar header */}
+      <div className="px-4 py-3 flex items-center justify-between border-b border-[var(--border-subtle)]">
+        <span className="text-sm font-semibold text-[var(--text-primary)]">Sessions</span>
+        <div className="flex items-center gap-1">
+          <button onClick={onNewAudit} className="btn-icon p-1.5" title="New audit">
+            <Plus className="h-4 w-4" strokeWidth={2} />
+          </button>
+          <button onClick={onToggle} className="btn-icon p-1.5" title="Collapse sidebar">
+            <PanelLeft className="h-4 w-4" strokeWidth={1.5} />
           </button>
         </div>
+      </div>
 
-        <div className="flex-1 overflow-y-auto py-3">
-          <div className="px-3 py-1.5 space-y-2">
-            <span className="text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider">
-              Sessions
-            </span>
-            <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--text-tertiary)]" strokeWidth={1.5} />
-              <input
-                type="text"
-                value={sessionSearch}
-                onChange={(e) => setSessionSearch(e.target.value)}
-                placeholder="Search sessions..."
-                className="w-full pl-7 pr-2 py-1 text-xs bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-md)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)] focus:border-transparent placeholder:text-[var(--text-tertiary)]"
-              />
-            </div>
-          </div>
-
-          <div className="px-2 space-y-0.5">
-            {filteredSessions.map((session) => (
-              <button
-                key={session.id}
-                onClick={() => { if (renameId !== session.id) setCurrentSession(session) }}
-                onDoubleClick={() => startRename(session.id, session.name || '')}
-                onContextMenu={(e) => {
-                  e.preventDefault()
-                  setContextMenu({ x: e.clientX, y: e.clientY, sessionId: session.id })
-                }}
-                className={`w-full text-left px-3 py-2 rounded-[var(--radius-md)] text-sm transition-colors duration-150 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-                  currentSession?.id === session.id
-                    ? 'bg-[var(--primary-subtle)] text-[var(--primary)]'
-                    : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <FileText className="h-3.5 w-3.5 flex-shrink-0 opacity-60" strokeWidth={2} />
-                  {renameId === session.id ? (
-                    <input
-                      ref={renameInputRef}
-                      value={renameValue}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onBlur={commitRename}
-                      onKeyDown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setRenameId(null) }}
-                      onClick={(e) => e.stopPropagation()}
-                      className="flex-1 min-w-0 px-1 py-0 text-sm bg-white border border-[var(--primary)] rounded-[var(--radius-sm)] outline-none"
-                    />
-                  ) : (
-                    <span className="truncate font-medium">{session.name || `Session ${session.id}`}</span>
-                  )}
-                </div>
-                <div className="text-[11px] opacity-50 mt-0.5 pl-5">
-                  {new Date(session.created_at).toLocaleDateString()}
-                </div>
-              </button>
-            ))}
-          </div>
-
-          {filteredSessions.length === 0 && (
-            <div className="px-4 py-3 text-xs text-[var(--text-tertiary)]">
-              {sessionSearch ? 'No sessions match your search' : 'No sessions yet'}
-            </div>
-          )}
-        </div>
-
-        <div className="p-2 border-t border-[var(--border)]">
-          <button
-            onClick={toggleSettings}
-            className="flex items-center gap-2 w-full px-2.5 py-1.5 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] rounded-[var(--radius-md)] transition-colors duration-150"
-          >
-            <Settings className="h-4 w-4" strokeWidth={1.5} />
-            Settings
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
-        <header className="h-[var(--header-height)] bg-[var(--surface)] border-b border-[var(--border)] px-3 flex items-center gap-3 shrink-0">
-          <button
-            onClick={toggleSidebar}
-            className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] rounded-[var(--radius-sm)] transition-colors duration-150"
-            title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-          >
-            {sidebarOpen ? <ChevronLeft className="h-4 w-4" strokeWidth={2} /> : <ChevronRight className="h-4 w-4" strokeWidth={2} />}
-          </button>
-
-          {currentSession ? (
-            <>
-              <h2 className="text-sm font-semibold text-[var(--text-primary)] truncate">
-                {currentSession.name || `Session ${currentSession.id}`}
-              </h2>
-
-              <div className="flex bg-[var(--bg)] p-0.5 ml-4 rounded-[var(--radius-md)] border border-[var(--border)]">
-                <button 
-                  onClick={() => setMainView('data')}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-[var(--radius-sm)] transition-all ${mainView === 'data' ? 'bg-[var(--surface)] text-[var(--primary)] shadow-sm ring-1 ring-[var(--border)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
-                >
-                  Transactions
-                </button>
-                <button 
-                  onClick={() => setMainView('review')}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-[var(--radius-sm)] transition-all ${mainView === 'review' ? 'bg-[var(--surface)] text-[var(--primary)] shadow-sm ring-1 ring-[var(--border)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
-                >
-                  Audit Review
-                </button>
-              </div>
-
-              <div className="flex-1" />
-
-              {tagSummary && (
-                <div className="flex items-center gap-1.5">
-                  <span className="tag-client">
-                    {tagSummary.client} client
-                  </span>
-                  <span className="tag-broker">
-                    {tagSummary.broker} broker
-                  </span>
-                  <span className="tag-suspicious">
-                    {tagSummary.suspicious} suspicious
-                  </span>
-                </div>
-              )}
-
-              {selectedTransactionIds.length > 0 && (
-                <div className="flex items-center gap-2 px-2.5 py-1 bg-[var(--primary-subtle)] rounded-[var(--radius-md)] border border-[var(--primary)]/10">
-                  <CheckSquare className="h-3.5 w-3.5 text-[var(--primary)]" strokeWidth={2} />
-                  <span className="text-xs font-medium text-[var(--primary)]">
-                    {selectedTransactionIds.length} selected
-                  </span>
-                  <span className="w-px h-4 bg-[var(--primary)]/20 mx-0.5" />
-                  <span className="text-[10px] text-[var(--text-tertiary)] mr-0.5">Tag:</span>
-                  <button
-                    onClick={() => handleBulkTag('client')}
-                    className="text-[10px] px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--success-subtle)] text-[var(--success)] hover:brightness-95 transition-all font-medium"
-                  >
-                    Client
-                  </button>
-                  <button
-                    onClick={() => handleBulkTag('broker')}
-                    className="text-[10px] px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--warning-subtle)] text-[var(--warning)] hover:brightness-95 transition-all font-medium"
-                  >
-                    Broker
-                  </button>
-                  <button
-                    onClick={() => handleBulkTag('suspicious')}
-                    className="text-[10px] px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--danger-subtle)] text-[var(--danger)] hover:brightness-95 transition-all font-medium"
-                  >
-                    Suspicious
-                  </button>
-                  <span className="w-px h-4 bg-[var(--primary)]/20 mx-0.5" />
-                  <button
-                    onClick={() => {
-                      const ids = selectedTransactionIds.flatMap((txId) => {
-                        const tx = transactions.find((t) => t.id === txId)
-                        return tx?.tags.map((t) => t.id) || []
-                      })
-                      if (ids.length > 0) {
-                        bulkRemoveTags(ids).then(() => refreshCurrentSession())
-                        clearSelection()
-                      }
-                    }}
-                    className="text-[10px] px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--surface-hover)] text-[var(--text-secondary)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-all font-medium"
-                  >
-                    Remove tags
-                  </button>
-                  <span className="w-px h-4 bg-[var(--primary)]/20 mx-0.5" />
-                  <button
-                    onClick={clearSelection}
-                    className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors duration-150"
-                  >
-                    <X className="h-3 w-3" strokeWidth={2} />
-                  </button>
-                </div>
-              )}
-
-              <button onClick={toggleExport} className="btn-secondary flex items-center gap-1.5 text-xs">
-                <Download className="h-3.5 w-3.5" strokeWidth={2} />
-                Export
-              </button>
-
-            </>
-          ) : (
-            <div className="flex-1" />
-          )}
-        </header>
-
-        {/* Content */}
-        <div className="flex-1 overflow-hidden">
-          {!currentSession ? (
-            <div className="h-full overflow-auto">
-              <div className="max-w-2xl mx-auto px-8 py-10">
-                <h1 className="text-xl font-semibold text-[var(--text-primary)]">Start New Audit</h1>
-                <p className="text-sm text-[var(--text-secondary)] mt-1 mb-8">
-                  Upload a bank statement and a client list. Set a threshold to flag suspicious transactions for this audit.
-                </p>
-                {processingError && (
-                  <div className="mb-6 p-3 bg-[var(--danger-subtle)] border border-[var(--danger)]/30 rounded-[var(--radius-md)] flex items-start gap-2">
-                    <AlertTriangle className="h-4 w-4 text-[var(--danger)] shrink-0 mt-0.5" strokeWidth={2} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-[var(--danger)]">Processing failed</p>
-                      <p className="text-xs text-[var(--text-secondary)] mt-0.5">{processingError}</p>
-                    </div>
-                    <button onClick={clearProcessingError} className="p-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
-                      <X className="h-3.5 w-3.5" strokeWidth={2} />
-                    </button>
-                  </div>
-                )}
-                <FileDropZone
-                  onFilesSelected={handleFilesSelected}
-                  isProcessing={isProcessing}
-                  processingProgress={processingProgress}
-                  brokers={brokers}
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="h-full flex">
-              {mainView === 'data' ? (
-                <div className="flex-1 flex flex-col min-w-0">
-                <SearchFilters
-                    searchQuery={searchQuery}
-                    filterTags={filterTags}
-                    advancedFilters={advancedFilters}
-                    filtersExpanded={filtersExpanded}
-                    resultFilter={resultFilter}
-                    filterCounts={filterCounts}
-                    clientOptions={clientOptions}
-                    brokerOptions={brokerOptions}
-                    partyOptions={partyOptions}
-                    pdfOptions={pdfOptions}
-                    activeFilterCount={activeFilterCount()}
-                    onSearchChange={setSearchQuery}
-                    onAdvancedFilterChange={setAdvancedFilter}
-                    onClearFilters={resetAdvancedFilters}
-                    onToggleFiltersExpanded={toggleFiltersExpanded}
-                    onRemoveFilterTag={handleRemoveFilterTag}
-                    onResultFilterChange={setResultFilter}
-                  />
-
-                  {isLoading || isAuditComputing ? (
-                    <div className="flex-1 flex items-center justify-center">
-                      <div className="animate-spin rounded-full h-6 w-6 border-2 border-[var(--border-strong)] border-t-[var(--primary)]" />
-                    </div>
-                  ) : (
-                    <div className="flex-1 flex flex-col min-h-0">
-                      <DataTable
-                        transactions={auditAnalytics.filteredTransactions}
-                        selectedIds={selectedTransactionIds}
-                        onSelectTransaction={handleSelectTransaction}
-                        onRemoveTag={handleRemoveTag}
-                        onAddTag={handleAddTag}
-                        searchQuery=""
-                        filterTags={[]}
-                        minAmount={minAmount}
-                        maxAmount={maxAmount}
-                        sessionId={currentSession?.id}
-                      />
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <AuditReviewPage
-                  analytics={auditAnalytics}
-                  activeTab={reviewView}
-                  onTabChange={setReviewView}
-                  onExceptionFilter={(key, value) => {
-                    if (key === 'resultFilter') {
-                      setResultFilter(value as 'client' | 'broker' | 'suspicious' | 'all')
-                    } else {
-                      setAdvancedFilter('exception', value as typeof advancedFilters.exception)
-                    }
-                    setMainView('data')
-                  }}
-                />
-              )}
-
-              
-            </div>
-          )}
-        </div>
-      </main>
-
-      {contextMenu && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={closeContextMenu} />
-          <div
-            ref={menuRef}
-            className="fixed z-50 min-w-[140px] bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg py-1"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
-          >
-            <button
-              onClick={handleContextDelete}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-colors text-left"
-            >
-              <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
-              Delete
+      {/* Session list */}
+      <div className="flex-1 overflow-y-auto py-2 px-2 space-y-0.5">
+        {sorted.length === 0 && (
+          <div className="text-center py-8">
+            <FileText className="h-8 w-8 mx-auto text-[var(--border-strong)] mb-2" strokeWidth={1} />
+            <p className="text-xs text-[var(--text-tertiary)]">No audit sessions yet</p>
+            <button onClick={onNewAudit} className="mt-3 btn-primary text-xs py-1.5 px-3">
+              <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+              Start audit
             </button>
           </div>
-        </>
+        )}
+
+        {sorted.map((session) => {
+          const isActive = currentSession?.id === session.id
+          const isRenaming = renaming === session.id
+
+          return (
+            <div
+              key={session.id}
+              onContextMenu={(e) => handleContextMenu(e, session.id)}
+              className={`
+                group relative flex items-center gap-2.5 px-3 py-2.5 rounded-[var(--radius-md)]
+                cursor-pointer select-none transition-all duration-150
+                ${isActive
+                  ? 'bg-[var(--primary-bg)] border border-[var(--primary)]/20 text-[var(--primary)]'
+                  : 'hover:bg-[var(--surface-hover)] text-[var(--text-primary)]'
+                }
+              `}
+              onClick={() => !isRenaming && onSessionSelect(session)}
+            >
+              <div className={`shrink-0 p-1 rounded-md ${isActive ? 'bg-[var(--primary-subtle)]' : 'bg-[var(--surface-inset)]'}`}>
+                <FileText className="h-3.5 w-3.5" strokeWidth={1.5} />
+              </div>
+
+              <div className="flex-1 min-w-0">
+                {isRenaming ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleRename(session.id); if (e.key === 'Escape') setRenaming(null) }}
+                      className="input-field text-xs py-0.5 px-1.5"
+                      autoFocus
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <button onClick={(e) => { e.stopPropagation(); handleRename(session.id) }} className="btn-icon p-0.5">
+                      <Check className="h-3 w-3" strokeWidth={2} />
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); setRenaming(null) }} className="btn-icon p-0.5">
+                      <X className="h-3 w-3" strokeWidth={2} />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-xs font-medium truncate">
+                      {session.name || `Audit #${session.id}`}
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[10px] text-[var(--text-tertiary)] flex items-center gap-1">
+                        <Clock className="h-2.5 w-2.5" strokeWidth={2} />
+                        {new Date(session.updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                      </span>
+                      {session.transaction_count != null && (
+                        <span className="text-[10px] text-[var(--text-tertiary)] flex items-center gap-0.5">
+                          <Hash className="h-2.5 w-2.5" strokeWidth={2} />
+                          {session.transaction_count}
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <button
+                onClick={(e) => { e.stopPropagation(); handleContextMenu(e, session.id) }}
+                className="opacity-0 group-hover:opacity-100 btn-icon p-1 shrink-0 transition-opacity"
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={2} />
+              </button>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Sidebar footer */}
+      <div className="px-3 py-2 border-t border-[var(--border-subtle)]">
+        <button onClick={onSettings} className="btn-ghost text-xs w-full justify-start py-2">
+          <Settings className="h-3.5 w-3.5" strokeWidth={1.5} />
+          Settings
+        </button>
+      </div>
+
+      {/* Context menu */}
+      {contextMenu && (
+        <div
+          ref={contextRef}
+          className="fixed z-50 card shadow-[var(--shadow-lg)] py-1 min-w-[160px] animate-scale-in"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            onClick={() => {
+              const s = sessions.find((s) => s.id === contextMenu.id)
+              setRenameValue(s?.name || '')
+              setRenaming(contextMenu.id)
+              setContextMenu(null)
+            }}
+            className="flex items-center gap-2.5 w-full px-3 py-2 text-xs text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-colors"
+          >
+            <Edit3 className="h-3.5 w-3.5" strokeWidth={1.5} />
+            Rename
+          </button>
+          <button
+            onClick={() => handleDelete(contextMenu.id)}
+            className="flex items-center gap-2.5 w-full px-3 py-2 text-xs text-[var(--danger)] hover:bg-[var(--danger-bg)] transition-colors"
+          >
+            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.5} />
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+/* ════════════════════════════════════════════════════════════════════════════
+   TOOLBAR
+   ════════════════════════════════════════════════════════════════════════════ */
+
+function Toolbar({
+  session,
+  activeView,
+  onViewChange,
+  onExport,
+  searchQuery,
+  onSearchChange,
+  filterCount,
+  onToggleFilters,
+  isComputing,
+}: {
+  session: AuditSession
+  activeView: 'data' | 'review'
+  onViewChange: (v: 'data' | 'review') => void
+  onExport: () => void
+  searchQuery: string
+  onSearchChange: (q: string) => void
+  filterCount: number
+  onToggleFilters: () => void
+  isComputing: boolean
+}) {
+  return (
+    <div className="h-[var(--header-height)] bg-[var(--surface)] border-b border-[var(--border)] px-4 flex items-center gap-3 shrink-0">
+      {/* View switcher */}
+      <div className="flex items-center bg-[var(--bg-raised)] rounded-[var(--radius-lg)] p-0.5 border border-[var(--border-subtle)]">
+        <ViewTab
+          active={activeView === 'data'}
+          onClick={() => onViewChange('data')}
+          icon={<Table2 className="h-3.5 w-3.5" strokeWidth={1.5} />}
+          label="Transactions"
+        />
+        <ViewTab
+          active={activeView === 'review'}
+          onClick={() => onViewChange('review')}
+          icon={<BarChart3 className="h-3.5 w-3.5" strokeWidth={1.5} />}
+          label="Review"
+        />
+      </div>
+
+      <div className="h-5 w-px bg-[var(--border)]" />
+
+      {/* Search */}
+      {activeView === 'data' && (
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-tertiary)]" strokeWidth={2} />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Search transactions..."
+            className="input-field pl-9 py-1.5 text-[13px] bg-[var(--bg)]"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => onSearchChange('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 btn-icon p-0.5"
+            >
+              <X className="h-3 w-3" strokeWidth={2} />
+            </button>
+          )}
+        </div>
       )}
 
-      {deleteConfirmId && (
-        <>
-          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setDeleteConfirmId(null)} />
-          <div className="fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-xl p-5 w-80">
-            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Delete session?</h3>
-            <p className="text-xs text-[var(--text-secondary)] mt-1">Are you sure you want to delete this session? This action cannot be undone.</p>
-            <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setDeleteConfirmId(null)} className="btn-ghost text-xs">Cancel</button>
-              <button onClick={() => confirmDelete(deleteConfirmId)} className="btn-danger text-xs">Delete</button>
+      {activeView === 'data' && (
+        <button
+          onClick={onToggleFilters}
+          className={`btn-secondary text-xs py-1.5 ${filterCount > 0 ? 'border-[var(--primary)]/30 text-[var(--primary)]' : ''}`}
+        >
+          <AlertTriangle className="h-3.5 w-3.5" strokeWidth={1.5} />
+          Filters
+          {filterCount > 0 && (
+            <span className="badge badge-primary text-[10px] ml-1 py-0 px-1.5">{filterCount}</span>
+          )}
+        </button>
+      )}
+
+      <div className="flex-1" />
+
+      {/* Session info */}
+      <div className="hidden lg:flex items-center gap-2 text-xs text-[var(--text-tertiary)]">
+        {isComputing && <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--primary)]" strokeWidth={2} />}
+        <span className="font-medium text-[var(--text-secondary)] truncate max-w-[200px]">
+          {session.name || `Audit #${session.id}`}
+        </span>
+      </div>
+
+      <div className="h-5 w-px bg-[var(--border)]" />
+
+      {/* Actions */}
+      <div className="flex items-center gap-1">
+        <button onClick={onExport} className="btn-icon p-2" title="Export">
+          <Download className="h-4 w-4" strokeWidth={1.5} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function ViewTab({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  label: string
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`
+        flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)]
+        transition-all duration-150
+        ${active
+          ? 'bg-[var(--surface)] text-[var(--primary)] shadow-[var(--shadow-xs)] ring-1 ring-[var(--border)]'
+          : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
+        }
+      `}
+    >
+      {icon}
+      {label}
+    </button>
+  )
+}
+
+
+/* ════════════════════════════════════════════════════════════════════════════
+   WELCOME SCREEN
+   ════════════════════════════════════════════════════════════════════════════ */
+
+function WelcomeScreen({
+  sessions,
+  onSessionSelect,
+  onNewAudit,
+}: {
+  sessions: AuditSession[]
+  onSessionSelect: (s: AuditSession) => void
+  onNewAudit: () => void
+}) {
+  const recent = [...sessions]
+    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+    .slice(0, 5)
+
+  return (
+    <div className="flex-1 flex items-center justify-center p-8 animate-fade-in">
+      <div className="text-center max-w-lg">
+        {/* Hero */}
+        <p className="text-sm text-[var(--text-secondary)] mb-8 max-w-sm mx-auto leading-relaxed">
+          Upload bank statements and client lists to begin. The system will automatically parse, match, and flag transactions for review.
+        </p>
+
+        <button onClick={onNewAudit} className="btn-primary text-sm px-6 py-2.5 mb-8">
+          <Plus className="h-4 w-4" strokeWidth={2} />
+          Start New Audit
+        </button>
+
+        {/* Recent sessions */}
+        {recent.length > 0 && (
+          <div className="mt-4">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)] mb-3">
+              Recent sessions
+            </p>
+            <div className="space-y-1.5 max-w-sm mx-auto">
+              {recent.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => onSessionSelect(s)}
+                  className="w-full flex items-center gap-3 px-4 py-3 card card-hover text-left group"
+                >
+                  <div className="p-1.5 rounded-md bg-[var(--surface-inset)]">
+                    <FileText className="h-3.5 w-3.5 text-[var(--text-tertiary)]" strokeWidth={1.5} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-[var(--text-primary)] truncate">
+                      {s.name || `Audit #${s.id}`}
+                    </div>
+                    <div className="text-[11px] text-[var(--text-tertiary)]">
+                      {new Date(s.updated_at).toLocaleDateString('en-IN', {
+                        day: '2-digit', month: 'short', year: 'numeric'
+                      })}
+                      {s.transaction_count != null && ` · ${s.transaction_count} transactions`}
+                    </div>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-[var(--text-tertiary)] opacity-0 group-hover:opacity-100 transition-opacity" strokeWidth={1.5} />
+                </button>
+              ))}
             </div>
           </div>
-        </>
-      )}
-
-      <SettingsPanel isOpen={settingsOpen} onClose={toggleSettings} />
-      <ExportPanel isOpen={exportOpen} onClose={toggleExport} sessionId={currentSession?.id || null} selectedIds={selectedTransactionIds} />
+        )}
+      </div>
     </div>
   )
 }

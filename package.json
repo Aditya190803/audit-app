@@ -13,7 +13,12 @@
     "preview": "electron-vite preview",
     "dist": "bun run build && bun run build:python && electron-builder",
     "dist:win": "bun run build && bun run build:python && electron-builder --win",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "typecheck": "tsc --noEmit",
+    "typecheck:watch": "tsc --noEmit --watch",
+    "test:frontend": "echo 'No frontend tests defined yet'",
+    "test:backend": "cd backend && python -m pytest || echo 'No backend tests found'",
+    "test": "bun run typecheck && bun run test:frontend && bun run test:backend"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",

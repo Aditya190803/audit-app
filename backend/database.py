@@ -3,7 +3,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'audit.db')
+DB_PATH = os.environ.get("AUDIT_DB_PATH") or os.path.join(os.path.dirname(__file__), 'audit.db')
 
 # ── Async engine (primary, for all route handlers) ──────────────────────
 ASYNC_DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"

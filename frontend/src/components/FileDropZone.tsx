@@ -4,9 +4,10 @@ import { FileText, FileSpreadsheet, Lock, X, ArrowRight, ChevronDown, Search, Ch
 import * as XLSX from 'xlsx'
 import { getParsers } from '../lib/api'
 import type { ParseProgress } from '../types/api'
+import { useSessionStore } from '../stores/sessionStore'
 
 interface FileDropZoneProps {
-  onFilesSelected: (
+  onFilesSelected?: (
     pdf: File | File[],
     clientList: File,
     threshold: number,
@@ -19,7 +20,7 @@ interface FileDropZoneProps {
       bankName?: string
     }
   ) => void
-  isProcessing: boolean
+  isProcessing?: boolean
   processingProgress?: ParseProgress | null
   brokers?: string[]
 }
@@ -72,7 +73,10 @@ function bestNameColumnMatch(headers: string[]): string | null {
   return headers[0] ?? null
 }
 
-export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isProcessing, processingProgress, brokers = [] }) => {
+export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isProcessing: isProcessingProp, processingProgress: processingProgressProp, brokers = [] }) => {
+  const sessionStore = useSessionStore()
+  const isProcessing = isProcessingProp ?? sessionStore.isProcessing
+  const processingProgress = processingProgressProp ?? sessionStore.processingProgress
   const [pdfFiles, setPdfFiles] = useState<File[]>([])
   const [clientListFile, setClientListFile] = useState<File | null>(null)
   const [passwords, setPasswords] = useState<Record<string, string>>({})
@@ -392,7 +396,14 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
   const handleProcess = () => {
     if (pdfFiles.length > 0 && clientListFile) {
       const hasPasswords = Object.values(passwords).some(Boolean)
-      const options: Parameters<typeof onFilesSelected>[3] = {
+      const options: {
+        password?: string
+        sheetName?: string
+        nameColumn?: string
+        excludedBrokers?: string[]
+        apCodes?: string[]
+        bankName?: string
+      } = {
         password: hasPasswords ? JSON.stringify(passwords) : undefined,
         excludedBrokers: excludedBrokers.size > 0 ? Array.from(excludedBrokers) : undefined,
         apCodes: apCodeEnabled && selectedApCodes.size > 0 ? Array.from(selectedApCodes) : undefined,
@@ -404,7 +415,11 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
       if (nameColumn.trim()) {
         options.nameColumn = nameColumn.trim()
       }
-      onFilesSelected(pdfFiles, clientListFile, threshold, options)
+      if (onFilesSelected) {
+        onFilesSelected(pdfFiles, clientListFile, threshold, options)
+      } else {
+        sessionStore.processFiles(pdfFiles, clientListFile, threshold, options)
+      }
     }
   }
 

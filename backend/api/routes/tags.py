@@ -6,7 +6,6 @@ from backend.models import Tag
 from backend.schemas import TagCreate, TagResponse, BulkTagRequest
 from backend.services.tagging_service import TaggingService
 from backend.services.audit_service import AuditService
-from backend.services.session_service import SessionService
 
 router = APIRouter(prefix="/tags", tags=["tags"])
 
@@ -53,7 +52,7 @@ def bulk_remove_tags(tag_ids: List[int], db: Session = Depends(get_db)):
 def bulk_add_tags(data: BulkTagRequest, db: Session = Depends(get_db)):
     service = TaggingService(db)
     audit = AuditService(db)
-    tags = []
+    new_tags = []
     for tx_id in data.transaction_ids:
         tag = service.add_manual_tag(
             transaction_id=tx_id,
@@ -62,12 +61,16 @@ def bulk_add_tags(data: BulkTagRequest, db: Session = Depends(get_db)):
             confidence=data.confidence,
             commit=False
         )
-        tags.append({"id": tag.id, "transaction_id": tx_id, "tag_type": data.tag_type})
+        new_tags.append(tag)
+    db.flush()
+    for tag in new_tags:
+        db.refresh(tag)
         audit.log("tag_added", "tag", tag.id,
                   old_value=None,
-                  new_value={"tag_type": data.tag_type, "transaction_id": tx_id},
+                  new_value={"tag_type": data.tag_type, "transaction_id": tag.transaction_id},
                   is_auto=False)
     db.commit()
-    for t in tags:
-        db.refresh(db.query(Tag).filter(Tag.id == t["id"]).first())
-    return {"tagged_count": len(tags), "tags": tags}
+    return {
+        "tagged_count": len(new_tags),
+        "tags": [{"id": t.id, "transaction_id": t.transaction_id, "tag_type": t.tag_type} for t in new_tags]
+    }

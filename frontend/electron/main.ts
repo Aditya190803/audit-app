@@ -54,6 +54,9 @@ async function startPythonBackend(port: number): Promise<void> {
       ...process.env,
       BACKEND_PORT: String(port),
       PYTHONPATH: APP_ROOT,
+      AUDIT_DB_PATH: app.isPackaged
+        ? path.join(app.getPath('userData'), 'audit.db')
+        : undefined,
       TESSDATA_PREFIX: app.isPackaged
         ? path.join(process.resourcesPath, 'tesseract', 'tessdata')
         : undefined
@@ -138,7 +141,9 @@ async function createWindow(): Promise<void> {
 
   if (VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(VITE_DEV_SERVER_URL)
-    mainWindow.webContents.openDevTools()
+    if (process.env.OPEN_DEVTOOLS === '1') {
+      mainWindow.webContents.openDevTools()
+    }
   } else {
     mainWindow.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
@@ -151,17 +156,18 @@ ipcMain.handle('read-example-files', async () => {
   const exampleDir = path.join(APP_ROOT, 'example')
   const result: { folders: Record<string, string[]>; clientList: string | null } = { folders: {}, clientList: null }
 
-  function scanDir(dir: string, parentKey: string) {
+  function scanDir(dir: string, relativeKey: string) {
     try {
       const entries = fs.readdirSync(dir, { withFileTypes: true })
       for (const entry of entries) {
         const fullPath = path.join(dir, entry.name)
         if (entry.isDirectory()) {
-          scanDir(fullPath, entry.name)
+          const childKey = relativeKey ? `${relativeKey}/${entry.name}` : entry.name
+          scanDir(fullPath, childKey)
         } else if (entry.name.endsWith('.pdf')) {
-          const folderName = parentKey || path.basename(dir)
-          if (!result.folders[folderName]) result.folders[folderName] = []
-          result.folders[folderName].push(fullPath)
+          const groupKey = relativeKey || path.basename(dir)
+          if (!result.folders[groupKey]) result.folders[groupKey] = []
+          result.folders[groupKey].push(fullPath)
         } else if (entry.name.endsWith('.xlsx') || entry.name.endsWith('.xls') || entry.name.endsWith('.csv')) {
           if (!result.clientList || entry.name.toLowerCase().includes('client')) {
             result.clientList = fullPath
@@ -175,18 +181,42 @@ ipcMain.handle('read-example-files', async () => {
   return result
 })
 
+const ALLOWED_EXTENSIONS = new Set(['.pdf', '.xlsx', '.xls', '.csv'])
+const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB
+
 ipcMain.handle('read-file-base64', async (_event, filePath: string) => {
   try {
-    // Resolve relative paths against APP_ROOT so they work regardless of CWD
     const resolvedPath = path.isAbsolute(filePath) ? filePath : path.join(APP_ROOT, filePath)
-    if (!fs.existsSync(resolvedPath)) {
-      console.error(`[Main] PDF file not found: ${resolvedPath} (original: ${filePath})`)
+    const resolved = path.resolve(resolvedPath)
+
+    // Only allow files within APP_ROOT
+    if (!resolved.startsWith(APP_ROOT)) {
+      console.error(`[Main] Blocked read outside APP_ROOT: ${resolved}`)
       return null
     }
-    const data = fs.readFileSync(resolvedPath)
-    return { name: path.basename(resolvedPath), data: data.toString('base64'), path: resolvedPath }
+
+    // Validate extension
+    const ext = path.extname(resolved).toLowerCase()
+    if (!ALLOWED_EXTENSIONS.has(ext)) {
+      console.error(`[Main] Blocked disallowed extension: ${ext} for ${resolved}`)
+      return null
+    }
+
+    if (!fs.existsSync(resolved)) {
+      console.error(`[Main] File not found: ${resolved}`)
+      return null
+    }
+
+    const stat = fs.statSync(resolved)
+    if (stat.size > MAX_FILE_SIZE) {
+      console.error(`[Main] File too large: ${stat.size} > ${MAX_FILE_SIZE}`)
+      return null
+    }
+
+    const data = fs.readFileSync(resolved)
+    return { name: path.basename(resolved), data: data.toString('base64'), path: resolved }
   } catch (e) {
-    console.error(`[Main] Failed to read PDF: ${filePath}`, e)
+    console.error(`[Main] Failed to read file: ${filePath}`, e)
     return null
   }
 })

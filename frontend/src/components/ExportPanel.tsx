@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { X, Download, FileSpreadsheet, FileText, FileImage } from 'lucide-react'
+import { X, Download, FileSpreadsheet, FileImage } from 'lucide-react'
 import type { ExportFormat } from '../types/api'
 import { exportFile } from '../lib/api'
 
@@ -10,34 +10,15 @@ interface ExportPanelProps {
   selectedIds?: number[]
 }
 
-function getExportTypes(selectedCount: number): { value: string; label: string }[] {
-  const types = [
-    { value: 'all', label: 'All Transactions' },
-    { value: 'client', label: 'Client' },
-    { value: 'broker', label: 'Broker' },
-    { value: 'suspicious', label: 'Suspicious' },
-    { value: 'tagged', label: 'All Tagged' }
-  ]
-  if (selectedCount > 0) {
-    types.unshift({ value: 'selected', label: `Selected (${selectedCount})` })
-  }
-  return types
-}
-
 const EXPORT_FORMATS: { value: ExportFormat; label: string; icon: React.ReactNode }[] = [
-  { value: 'csv', label: 'CSV', icon: <FileText className="h-4 w-4" strokeWidth={1.5} /> },
-  { value: 'excel', label: 'Excel', icon: <FileSpreadsheet className="h-4 w-4" strokeWidth={1.5} /> },
-  { value: 'pdf-highlight', label: 'Highlighted PDF', icon: <FileImage className="h-4 w-4" strokeWidth={1.5} /> },
-  { value: 'pdf-report', label: 'PDF Report', icon: <FileImage className="h-4 w-4" strokeWidth={1.5} /> }
+  { value: 'excel', label: 'Excel Workbook', icon: <FileSpreadsheet className="h-4 w-4" strokeWidth={1.5} /> },
+  { value: 'pdf-highlight', label: 'Highlighted PDF', icon: <FileImage className="h-4 w-4" strokeWidth={1.5} /> }
 ]
 
-export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessionId, selectedIds }) => {
-  const exportTypes = getExportTypes(selectedIds?.length || 0)
-  const [selectedType, setSelectedType] = useState(exportTypes[0]?.value || 'all')
-  const [selectedFormat, setSelectedFormat] = useState<ExportFormat>('csv')
+export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessionId }) => {
+  const [selectedFormat, setSelectedFormat] = useState<ExportFormat>('excel')
   const [isExporting, setIsExporting] = useState(false)
 
-  // Reset to first option when selectedIds change
   if (!isOpen) return null
 
   const handleExport = async () => {
@@ -45,18 +26,16 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessi
     setIsExporting(true)
     try {
       const { showSaveDialog } = window.electronAPI
-      const defaultExt = selectedFormat === 'csv' ? 'csv' : selectedFormat === 'excel' ? 'xlsx' : 'pdf'
+      const defaultExt = selectedFormat === 'excel' ? 'xlsx' : 'pdf'
       const filters = [{ name: defaultExt.toUpperCase(), extensions: [defaultExt] }]
-      const isSelected = selectedType === 'selected'
-      const effectiveType = isSelected ? 'all' : selectedType
 
       const result = await showSaveDialog({
-        defaultPath: `export_${isSelected ? 'selected' : selectedType}.${defaultExt}`,
+        defaultPath: selectedFormat === 'excel' ? `audit_workbook.${defaultExt}` : `highlighted_statement.${defaultExt}`,
         filters
       })
 
       if (!result.canceled && result.filePath) {
-        await exportFile(sessionId, effectiveType, selectedFormat, result.filePath, isSelected ? selectedIds : undefined)
+        await exportFile(sessionId, 'all', selectedFormat, result.filePath)
         onClose()
       }
     } catch (e) {
@@ -81,24 +60,11 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessi
         </div>
 
         <div className="p-5 space-y-5">
-          <div>
-            <label className="block text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider mb-2">Export Type</label>
-            <div className="grid grid-cols-1 gap-1">
-              {exportTypes.map((type) => (
-                <button
-                  key={type.value}
-                  onClick={() => setSelectedType(type.value)}
-                  className={`px-3 py-2 text-left text-sm rounded-[var(--radius-md)] border transition-colors duration-150 ${
-                    selectedType === type.value
-                      ? 'border-[var(--primary)] bg-[var(--primary-subtle)] text-[var(--primary)]'
-                      : 'border-[var(--border)] hover:border-[var(--border-strong)] text-[var(--text-primary)]'
-                  }`}
-                >
-                  {type.label}
-                </button>
-              ))}
+          {selectedFormat === 'excel' && (
+            <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs leading-5 text-[var(--text-secondary)]">
+              Excel exports the full audit workbook with account transactions, client, broker, and suspicious sheets.
             </div>
-          </div>
+          )}
 
           <div>
             <label className="block text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider mb-2">Format</label>

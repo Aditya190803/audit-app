@@ -8,7 +8,7 @@ import {
   TrendingDown,
   TrendingUp,
 } from 'lucide-react'
-import type { AdvancedFilters, AuditAnalytics, ReviewView } from '../utils/auditAnalytics'
+import type { AuditAnalytics, ReviewView } from '../utils/auditAnalytics'
 import { SummaryView } from './SummaryView'
 import { ExceptionsView } from './ExceptionsView'
 import { QuickStats } from './QuickStats'
@@ -17,7 +17,8 @@ interface AuditReviewPanelProps {
   analytics: AuditAnalytics
   reviewView: ReviewView
   onReviewViewChange: (view: ReviewView) => void
-  onFilterChange: <K extends keyof AdvancedFilters>(key: K, value: AdvancedFilters[K]) => void
+  onFilterChange: (key: string, value: string) => void
+  suspiciousThreshold: number
 }
 
 function money(value: number): string {
@@ -35,6 +36,7 @@ export const AuditReviewPanel: React.FC<AuditReviewPanelProps> = ({
   reviewView,
   onReviewViewChange,
   onFilterChange,
+  suspiciousThreshold,
 }) => {
   const [compact, setCompact] = useState(false)
 
@@ -96,7 +98,7 @@ export const AuditReviewPanel: React.FC<AuditReviewPanelProps> = ({
           )}
 
           {reviewView === 'summary' && (
-            <SummaryView analytics={analytics} />
+            <SummaryView analytics={analytics} suspiciousThreshold={suspiciousThreshold} />
           )}
         </div>
       )}
