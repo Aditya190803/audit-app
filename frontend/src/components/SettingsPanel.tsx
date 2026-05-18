@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { X, RotateCcw, Plus, Trash2, Save } from 'lucide-react'
+import { X, RotateCcw, Plus, Trash2, Save, RefreshCw, Download } from 'lucide-react'
 import { useSettingsStore } from '../stores/settingsStore'
+import type { AppUpdateStatus } from '../types/electron'
 
 interface SettingsPanelProps {
   isOpen: boolean
@@ -14,10 +15,24 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
   const [brokers, setBrokers] = useState<string[]>([])
   const [newKeyword, setNewKeyword] = useState('')
   const [keywords, setKeywords] = useState<string[]>([])
+  const [appVersion, setAppVersion] = useState('')
+  const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus>({
+    status: 'idle',
+    message: 'Updates have not been checked yet.'
+  })
 
   useEffect(() => {
     if (isOpen) loadSettings()
   }, [isOpen, loadSettings])
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    window.electronAPI?.getAppVersion?.().then(setAppVersion).catch(() => setAppVersion(''))
+    return window.electronAPI?.onUpdateStatus?.((status) => {
+      setUpdateStatus(status)
+    })
+  }, [isOpen])
 
   useEffect(() => {
     setLocalSettings(settings)
@@ -47,6 +62,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
   const handleReset = async () => {
     if (confirm('Reset all settings to defaults?')) {
       await resetSettings()
+    }
+  }
+
+  const handleCheckUpdates = async () => {
+    const status = await window.electronAPI.checkForUpdates()
+    setUpdateStatus(status)
+  }
+
+  const handleInstallUpdate = async () => {
+    const result = await window.electronAPI.installUpdate()
+    if (!result.success) {
+      setUpdateStatus({ status: 'error', message: result.error || 'Failed to install update.' })
     }
   }
 
@@ -118,6 +145,46 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
               <span className="text-sm font-mono font-medium text-[var(--text-primary)] w-12 text-right">
                 {Math.round(fuzzyThreshold * 100)}%
               </span>
+            </div>
+          </div>
+
+          {/* Updates */}
+          <div>
+            <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">App Updates</label>
+            <div className="border border-[var(--border)] rounded-[var(--radius-md)] p-3 bg-[var(--bg)]">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--text-primary)]">
+                    Current version{appVersion ? ` ${appVersion}` : ''}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
+                    {updateStatus.message}
+                  </p>
+                  {updateStatus.version && (
+                    <p className="mt-1 text-[11px] text-[var(--text-tertiary)]">
+                      Release version: {updateStatus.version}
+                    </p>
+                  )}
+                </div>
+                {updateStatus.status === 'downloaded' ? (
+                  <button
+                    onClick={handleInstallUpdate}
+                    className="btn-primary flex shrink-0 items-center gap-1.5 text-xs"
+                  >
+                    <Download className="h-3.5 w-3.5" strokeWidth={2} />
+                    Install
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleCheckUpdates}
+                    disabled={updateStatus.status === 'checking' || updateStatus.status === 'downloading'}
+                    className="btn-secondary flex shrink-0 items-center gap-1.5 text-xs"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${updateStatus.status === 'checking' || updateStatus.status === 'downloading' ? 'animate-spin' : ''}`} strokeWidth={2} />
+                    Check
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 

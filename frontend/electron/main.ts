@@ -4,13 +4,174 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import getPort from 'get-port'
 import fs from 'node:fs'
+import { autoUpdater, type UpdateInfo } from 'electron-updater'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const APP_ROOT = findProjectRoot(__dirname)
 
 let pythonProcess: ReturnType<typeof spawn> | null = null
 let backendPort: number = 0
+let updateStatus: UpdateStatus = {
+  status: 'idle',
+  message: 'Updates have not been checked yet.'
+}
+
+type UpdateStatusName =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error'
+  | 'unsupported'
+
+type UpdateStatus = {
+  status: UpdateStatusName
+  message: string
+  version?: string
+  releaseName?: string
+  releaseDate?: string
+  percent?: number
+}
+
+type GitHubUpdateConfig = {
+  owner: string
+  repo: string
+  token?: string
+  privateRepo: boolean
+}
 
 process.env.APP_ROOT = APP_ROOT
+
+autoUpdater.autoDownload = true
+autoUpdater.autoInstallOnAppQuit = true
+
+function publishUpdateStatus(next: UpdateStatus): UpdateStatus {
+  updateStatus = next
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('update-status', updateStatus)
+  }
+  return updateStatus
+}
+
+function normalizeUpdateInfo(status: UpdateStatusName, message: string, info?: UpdateInfo): UpdateStatus {
+  return {
+    status,
+    message,
+    version: info?.version,
+    releaseName: info?.releaseName || undefined,
+    releaseDate: info?.releaseDate
+  }
+}
+
+function readOptionalTextFile(filePath?: string): string | null {
+  if (!filePath) return null
+
+  try {
+    const resolved = path.resolve(filePath)
+    if (!fs.existsSync(resolved)) return null
+    return fs.readFileSync(resolved, 'utf8').trim() || null
+  } catch {
+    return null
+  }
+}
+
+function readGitHubUpdateToken(): string | null {
+  return (
+    process.env.UPDATE_GITHUB_TOKEN?.trim() ||
+    process.env.GH_TOKEN?.trim() ||
+    readOptionalTextFile(process.env.UPDATE_GITHUB_TOKEN_FILE) ||
+    readOptionalTextFile(path.join(app.getPath('userData'), 'github-update-token')) ||
+    null
+  )
+}
+
+function isTruthyEnv(value?: string): boolean {
+  return value === '1' || value?.toLowerCase() === 'true' || value?.toLowerCase() === 'yes'
+}
+
+function getGitHubUpdateConfig(): GitHubUpdateConfig | null {
+  const repository = process.env.UPDATE_GITHUB_REPOSITORY || process.env.GITHUB_REPOSITORY
+  const [envOwner, envRepo] = [process.env.UPDATE_GITHUB_OWNER, process.env.UPDATE_GITHUB_REPO]
+  const token = readGitHubUpdateToken() || undefined
+  const privateRepo = isTruthyEnv(process.env.UPDATE_GITHUB_PRIVATE) || Boolean(token)
+
+  if (envOwner && envRepo) {
+    return { owner: envOwner, repo: envRepo, token, privateRepo }
+  }
+
+  if (repository) {
+    const match = repository.match(/(?:github\.com[/:])?([^/\s]+)\/([^/\s.]+)(?:\.git)?$/)
+    if (match) {
+      return { owner: match[1], repo: match[2], token, privateRepo }
+    }
+  }
+
+  return null
+}
+
+function configureGitHubUpdates(): { ok: true } | { ok: false; message: string } {
+  const config = getGitHubUpdateConfig()
+  if (!config) {
+    return {
+      ok: false,
+      message: 'Set UPDATE_GITHUB_OWNER and UPDATE_GITHUB_REPO, or GITHUB_REPOSITORY, to enable GitHub release updates.'
+    }
+  }
+
+  if (config.privateRepo && !config.token) {
+    return {
+      ok: false,
+      message: 'Private GitHub updates require GH_TOKEN, UPDATE_GITHUB_TOKEN, UPDATE_GITHUB_TOKEN_FILE, or a github-update-token file in app data.'
+    }
+  }
+
+  autoUpdater.requestHeaders = null
+  autoUpdater.setFeedURL({
+    provider: 'github',
+    owner: config.owner,
+    repo: config.repo,
+    private: config.privateRepo,
+    token: config.token
+  })
+
+  if (config.token) {
+    autoUpdater.addAuthHeader(`token ${config.token}`)
+  }
+
+  return { ok: true }
+}
+
+autoUpdater.on('checking-for-update', () => {
+  publishUpdateStatus({ status: 'checking', message: 'Checking GitHub releases...' })
+})
+
+autoUpdater.on('update-available', (info) => {
+  publishUpdateStatus(normalizeUpdateInfo('available', `Version ${info.version} is available. Downloading update...`, info))
+})
+
+autoUpdater.on('update-not-available', (info) => {
+  publishUpdateStatus(normalizeUpdateInfo('not-available', `You are already on the latest version (${app.getVersion()}).`, info))
+})
+
+autoUpdater.on('download-progress', (progress) => {
+  publishUpdateStatus({
+    status: 'downloading',
+    message: `Downloading update (${Math.round(progress.percent)}%)...`,
+    percent: progress.percent
+  })
+})
+
+autoUpdater.on('update-downloaded', (info) => {
+  publishUpdateStatus(normalizeUpdateInfo('downloaded', `Version ${info.version} is ready to install.`, info))
+})
+
+autoUpdater.on('error', (error) => {
+  publishUpdateStatus({
+    status: 'error',
+    message: error instanceof Error ? error.message : String(error)
+  })
+})
 
 function findProjectRoot(startDir: string): string {
   let dir = startDir
@@ -47,9 +208,9 @@ async function startPythonBackend(port: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const { command, args, cwd } = resolveBackendPath()
     const allArgs = [...args, '--port', String(port)]
-    
+
     console.log(`[Main] Starting Python backend: ${command} ${allArgs.join(' ')}`)
-    
+
     const env = {
       ...process.env,
       BACKEND_PORT: String(port),
@@ -129,7 +290,7 @@ async function createWindow(): Promise<void> {
 
   // Start Python backend
   backendPort = await getPort({ port: [8765, 8766, 8767, 8768, 8769] })
-  
+
   try {
     await startPythonBackend(backendPort)
   } catch (err) {
@@ -235,6 +396,43 @@ ipcMain.handle('show-save-dialog', async (_event, options: { defaultPath?: strin
 })
 
 ipcMain.handle('get-app-version', () => app.getVersion())
+
+ipcMain.handle('check-for-updates', async () => {
+  if (!app.isPackaged) {
+    return publishUpdateStatus({
+      status: 'unsupported',
+      message: 'Update checks are available in packaged builds.'
+    })
+  }
+
+  const updateConfig = configureGitHubUpdates()
+  if (!updateConfig.ok) {
+    return publishUpdateStatus({
+      status: 'unsupported',
+      message: updateConfig.message
+    })
+  }
+
+  try {
+    publishUpdateStatus({ status: 'checking', message: 'Checking GitHub releases...' })
+    await autoUpdater.checkForUpdates()
+    return updateStatus
+  } catch (error) {
+    return publishUpdateStatus({
+      status: 'error',
+      message: error instanceof Error ? error.message : String(error)
+    })
+  }
+})
+
+ipcMain.handle('install-update', async () => {
+  if (updateStatus.status !== 'downloaded') {
+    return { success: false, error: 'No downloaded update is ready to install.' }
+  }
+
+  setImmediate(() => autoUpdater.quitAndInstall())
+  return { success: true }
+})
 
 app.on('window-all-closed', () => {
   stopPythonBackend()

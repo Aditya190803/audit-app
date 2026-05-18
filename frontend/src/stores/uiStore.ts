@@ -36,6 +36,7 @@ interface UIState {
   toggleSettings: () => void
   toggleExport: () => void
   togglePasswordDialog: () => void
+  closeModals: () => void
   setShowNewAudit: (show: boolean) => void
   goHome: () => void
   selectTransaction: (id: number, multi?: boolean) => void
@@ -82,6 +83,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
   toggleExport: () => set((s) => ({ exportOpen: !s.exportOpen })),
   togglePasswordDialog: () => set((s) => ({ passwordDialogOpen: !s.passwordDialogOpen })),
+  closeModals: () => set({ settingsOpen: false, exportOpen: false, passwordDialogOpen: false }),
   setShowNewAudit: (show) => set({ showNewAudit: show }),
   goHome: () => set({
     showNewAudit: false,

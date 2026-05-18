@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { FileText, FileSpreadsheet, Lock, X, ArrowRight, ChevronDown, Search, Check, FolderOpen, FileIcon, RefreshCw, Building2 } from 'lucide-react'
+import { FileText, FileSpreadsheet, Lock, X, ArrowRight, ChevronDown, Search, Check, Building2 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { getParsers } from '../lib/api'
 import type { ParseProgress } from '../types/api'
@@ -95,10 +95,6 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
   const [brokerDropdownOpen, setBrokerDropdownOpen] = useState(false)
   const [brokerSearch, setBrokerSearch] = useState('')
   const brokerDropdownRef = useRef<HTMLDivElement>(null)
-  const [exampleFolders, setExampleFolders] = useState<Record<string, string[]> | null>(null)
-  const [clientListPath, setClientListPath] = useState<string | null>(null)
-  const [loadingExample, setLoadingExample] = useState<string | null>(null)
-  const [exampleLoading, setExampleLoading] = useState(true)
   const [parsers, setParsers] = useState<{ name: string; display_name: string }[]>([])
   const [bankName, setBankName] = useState('')
 
@@ -119,45 +115,6 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
       console.error('[FileDropZone] Failed to load parsers:', e)
     })
   }, [])
-
-  // Load example files on mount
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.electronAPI?.readExampleFiles) {
-      setExampleLoading(true)
-      window.electronAPI.readExampleFiles().then((result) => {
-        setExampleFolders(result.folders)
-        setClientListPath(result.clientList)
-        setExampleLoading(false)
-      }).catch(() => setExampleLoading(false))
-    } else {
-      setExampleLoading(false)
-    }
-  }, [])
-
-  const loadExamplePair = async (pdfPath: string) => {
-    if (!clientListPath || !window.electronAPI?.readFileBase64) return
-    setLoadingExample(pdfPath)
-    try {
-      const [pdfResult, clientResult] = await Promise.all([
-        window.electronAPI.readFileBase64(pdfPath),
-        window.electronAPI.readFileBase64(clientListPath)
-      ])
-      if (pdfResult && clientResult) {
-        const pdfBlob = await fetch(`data:application/pdf;base64,${pdfResult.data}`).then((r) => r.blob())
-        const pdfFile = new File([pdfBlob], pdfResult.name, { type: 'application/pdf' })
-        const ext = clientResult.name.endsWith('.csv') ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        const clientBlob = await fetch(`data:${ext};base64,${clientResult.data}`).then((r) => r.blob())
-        const clientFile = new File([clientBlob], clientResult.name, { type: ext })
-        setPdfFiles([pdfFile])
-        setClientListFile(clientFile)
-        setShowPassword(false)
-        setPasswords({})
-      }
-    } catch (e) {
-      console.error('Failed to load example files:', e)
-    }
-    setLoadingExample(null)
-  }
 
   // Parse columns from selected header row (CSV only)
   useEffect(() => {
@@ -463,51 +420,6 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
 
   return (
     <div className="space-y-8">
-      {/* Quick Load - Example Files */}
-      {exampleLoading ? null : exampleFolders && Object.keys(exampleFolders).length > 0 && (
-        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-[var(--border)] flex items-center gap-2">
-            <FolderOpen className="h-3.5 w-3.5 text-[var(--text-tertiary)]" strokeWidth={1.5} />
-            <span className="text-xs font-medium text-[var(--text-tertiary)] uppercase tracking-wider">Quick Load</span>
-          </div>
-          <div className="p-3 space-y-3">
-            {Object.entries(exampleFolders).map(([folder, files]) => (
-              <div key={folder}>
-                <div className="text-[11px] font-medium text-[var(--text-secondary)] mb-1.5 px-1 capitalize">
-                  {folder.replace(/-/g, ' ')}
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {files.map((filePath) => {
-                    const name = filePath.split('/').pop() || filePath.split('\\').pop() || filePath
-                    const isLoading = loadingExample === filePath
-                    const isActive = pdfFiles.some(f => f.name === name)
-                    return (
-                      <button
-                        key={filePath}
-                        onClick={() => loadExamplePair(filePath)}
-                        disabled={!!loadingExample}
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-[var(--radius-md)] border transition-colors duration-150 ${
-                          isActive
-                            ? 'border-[var(--primary)] bg-[var(--primary-subtle)] text-[var(--primary)]'
-                            : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]'
-                        } ${isLoading ? 'opacity-50 pointer-events-none' : ''}`}
-                      >
-                        {isLoading ? (
-                          <RefreshCw className="h-3 w-3 animate-spin" strokeWidth={2} />
-                        ) : (
-                          <FileIcon className="h-3 w-3 shrink-0" strokeWidth={1.5} />
-                        )}
-                        {name}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Drop zones */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div

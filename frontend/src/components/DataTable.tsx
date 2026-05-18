@@ -32,6 +32,10 @@ function money(v: number | null): string {
   return `₹${abs.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+function cleanCellText(value: string | null | undefined): string {
+  return value ? value.replace(/\s+/g, ' ').trim() : ''
+}
+
 interface DataTableProps {
   analytics: AuditAnalytics
   isLoading: boolean
@@ -145,7 +149,7 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
         header: 'Description',
         accessorFn: (row) => row.description || row.raw_text || '',
         cell: ({ row }) => {
-          const desc = row.original.description || row.original.raw_text || '–'
+          const desc = cleanCellText(row.original.description || row.original.raw_text) || '–'
           return (
             <div className="min-w-0">
               <div className="text-[13px] text-[var(--text-primary)] truncate" title={desc}>
@@ -164,10 +168,11 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
         cell: ({ getValue }) => {
           const v = getValue() as number | null
           const isDebit = v != null && v < 0
+          const isCredit = v != null && v > 0
           return (
             <span
               className={`font-mono text-[13px] font-medium whitespace-nowrap ${
-                isDebit ? 'text-[var(--danger)]' : 'text-[var(--text-primary)]'
+                isDebit ? 'text-[var(--danger)]' : isCredit ? 'text-[var(--success)]' : 'text-[var(--text-primary)]'
               }`}
             >
               {money(v)}
@@ -295,7 +300,7 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
   }
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-[var(--bg)]">
+    <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-[var(--bg)]">
       {/* Status bar */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-[var(--surface)] border-b border-[var(--border-subtle)] text-[11px] text-[var(--text-tertiary)] shrink-0">
         <span>
@@ -372,12 +377,11 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
       </div>
 
       {/* Virtualized rows */}
-      <div ref={parentRef} className="flex-1 overflow-auto">
+      <div ref={parentRef} className="flex-1 min-h-0 overflow-auto">
         <div style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const row = rows[virtualRow.index]
             const isSelected = selectedTransactionIds.includes(row.original.id)
-            const isSuspicious = row.original.tags.some((t) => t.tag_type === 'suspicious')
 
             return (
               <div
@@ -388,9 +392,7 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
                   transition-colors duration-100 cursor-pointer
                   ${isSelected
                     ? 'bg-[var(--primary-bg)]'
-                    : isSuspicious
-                      ? 'bg-[var(--danger-bg)] hover:bg-[var(--danger-subtle)]/40'
-                      : 'bg-[var(--surface)] hover:bg-[var(--surface-hover)]'
+                    : 'bg-[var(--surface)] hover:bg-[var(--surface-hover)]'
                   }
                 `}
                 style={{

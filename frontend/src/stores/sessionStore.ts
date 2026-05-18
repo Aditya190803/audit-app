@@ -72,7 +72,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
   setCurrentSession: (session) => {
-    set({ currentSession: session })
+    set({
+      currentSession: session,
+      ...(session ? {} : { transactions: [], tagSummary: null })
+    })
     if (session) {
       get().loadTransactions(session.id)
       get().loadTagSummary(session.id)

@@ -2,8 +2,7 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.worksheet.worksheet import Worksheet
-import fitz
-from typing import List, Dict, Optional, Union
+from typing import List, Dict
 from sqlalchemy.orm import Session
 from backend.models import Transaction, Tag
 import re
@@ -11,7 +10,7 @@ import re
 class ExportService:
     def __init__(self, db: Session):
         self.db = db
-    
+
     def export_excel(self, transactions: List[Transaction], file_path: str, session_name: str = "Audit"):
         """Export transactions to a formatted multi-sheet Excel workbook."""
         wb = Workbook()
@@ -75,19 +74,8 @@ class ExportService:
         subtle_side = Side(style="thin", color="D9E2EC")
         thin_border = Border(left=subtle_side, right=subtle_side, top=subtle_side, bottom=subtle_side)
 
-        ws["A1"] = title
-        ws["A1"].font = Font(size=14, bold=True, color="1F2937")
-        ws["A1"].fill = title_fill
-        ws["A2"] = "Account / Session"
-        ws["B2"] = session_name
-        ws["A3"] = "Transaction Count"
-        ws["B3"] = len(transactions)
-        for row in range(1, 4):
-            for col in range(1, len(headers) + 1):
-                ws.cell(row=row, column=col).border = thin_border
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
+        header_row = 1
 
-        header_row = 5
         for col, header in enumerate(headers, 1):
             cell = ws.cell(row=header_row, column=col, value=header)
             cell.fill = header_fill
@@ -141,8 +129,27 @@ class ExportService:
             ws.cell(row=empty_row, column=1).border = thin_border
             ws.merge_cells(start_row=empty_row, start_column=1, end_row=empty_row, end_column=len(headers))
 
-        ws.freeze_panes = "A6"
-        ws.auto_filter.ref = f"A{header_row}:{ws.cell(row=max(header_row, ws.max_row), column=len(headers)).coordinate}"
+        data_end_row = ws.max_row
+        meta_start_row = ws.max_row + 2
+        ws.cell(row=meta_start_row, column=1, value="Sheet Metadata").font = Font(bold=True)
+        ws.cell(row=meta_start_row, column=1).fill = title_fill
+        ws.merge_cells(start_row=meta_start_row, start_column=1, end_row=meta_start_row, end_column=len(headers))
+
+        ws.cell(row=meta_start_row+1, column=1, value="Account / Session").font = Font(bold=True)
+        ws.cell(row=meta_start_row+1, column=2, value=session_name)
+
+        ws.cell(row=meta_start_row+2, column=1, value="Transaction Count").font = Font(bold=True)
+        ws.cell(row=meta_start_row+2, column=2, value=len(transactions))
+
+        ws.cell(row=meta_start_row+3, column=1, value="Sheet Category").font = Font(bold=True)
+        ws.cell(row=meta_start_row+3, column=2, value=title)
+
+        for r in range(meta_start_row, meta_start_row+4):
+            for c in range(1, len(headers) + 1):
+                ws.cell(row=r, column=c).border = thin_border
+
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = f"A{header_row}:{ws.cell(row=data_end_row, column=len(headers)).coordinate}"
 
         for col in ws.columns:
             max_length = 0
@@ -206,107 +213,3 @@ class ExportService:
     def _party_sort_key(self, tx: Transaction) -> str:
         value = tx.party_name or tx.description or tx.raw_text or "Unknown"
         return re.sub(r"\s+", " ", value).strip().casefold()
-    
-    def export_highlighted_pdf(self, transactions: List[Transaction], 
-                               original_pdf_path: Union[str, List[str]], 
-                               output_path: str,
-                               password: Optional[str] = None):
-        """Create a highlighted PDF with tagged transactions annotated."""
-        pdf_paths = original_pdf_path if isinstance(original_pdf_path, list) else [original_pdf_path]
-        doc = self._open_export_document(pdf_paths, password)
-        
-        # Color mapping for tags
-        colors = {
-            "client": (0, 1, 0),      # Green
-            "broker": (1, 1, 0),      # Yellow
-            "suspicious": (1, 0, 0)   # Red
-        }
-        
-        for tx in transactions:
-            tags = self.db.query(Tag).filter(Tag.transaction_id == tx.id).all()
-            if not tags:
-                continue
-            
-            page_rects = self._find_transaction_rects(doc, self._highlight_search_candidates(tx), tx.page_number)
-            if not page_rects:
-                continue
-
-            page, rects = page_rects
-            priority = ["client", "broker", "suspicious"]
-            tag_type = None
-            for p in priority:
-                if any(t.tag_type == p for t in tags):
-                    tag_type = p
-                    break
-
-            if tag_type and tag_type in colors:
-                for rect in rects:
-                    highlight = page.add_highlight_annot(rect)
-                    highlight.set_colors(stroke=colors[tag_type])
-                    highlight.update()
-        
-        doc.save(output_path)
-        doc.close()
-        return output_path
-
-    def _highlight_search_candidates(self, tx: Transaction) -> List[str]:
-        candidates = []
-        for value in (tx.raw_text, tx.description, tx.party_name):
-            if not value:
-                continue
-            normalized = re.sub(r"\s+", " ", str(value)).strip()
-            if normalized:
-                candidates.append(normalized)
-            for part in re.split(r"[\n|]{1,}|\s{3,}", str(value)):
-                part = re.sub(r"\s+", " ", part).strip()
-                if len(part) >= 4:
-                    candidates.append(part)
-
-        unique_candidates = []
-        seen = set()
-        for candidate in candidates:
-            key = candidate.casefold()
-            if key not in seen:
-                seen.add(key)
-                unique_candidates.append(candidate)
-        return unique_candidates
-
-    def _find_transaction_rects(self, doc: fitz.Document, search_texts: List[str], page_number: Optional[int]):
-        if not search_texts:
-            return None
-
-        page_indexes = []
-        if page_number and 1 <= page_number <= len(doc):
-            page_indexes.append(page_number - 1)
-        page_indexes.extend(i for i in range(len(doc)) if i not in page_indexes)
-
-        for page_index in page_indexes:
-            page = doc[page_index]
-            for search_text in search_texts:
-                rects = page.search_for(search_text)
-                if rects:
-                    return page, rects
-        return None
-
-    def _open_export_document(self, pdf_paths: List[str], password: Optional[str] = None) -> fitz.Document:
-        """Open one or more PDFs as a single logical document for highlighting."""
-        if len(pdf_paths) == 1:
-            doc = fitz.open(pdf_paths[0])
-            if doc.is_encrypted and password:
-                doc.authenticate(password)
-            return doc
-
-        merged = fitz.open()
-        opened_docs = []
-        try:
-            for pdf_path in pdf_paths:
-                source = fitz.open(pdf_path)
-                opened_docs.append(source)
-                if source.is_encrypted:
-                    if not password or not source.authenticate(password):
-                        raise ValueError(f"PDF is encrypted and requires a valid password: {pdf_path}")
-                merged.insert_pdf(source)
-        finally:
-            for source in opened_docs:
-                source.close()
-        return merged

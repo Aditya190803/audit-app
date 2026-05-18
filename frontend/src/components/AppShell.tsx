@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import {
   Plus, FileText, Search, Settings, Download,
-  Trash2, MoreHorizontal, Clock, Hash, ArrowRight, PanelLeft,
+  Trash2, MoreHorizontal, Clock, ArrowRight, PanelLeft,
   Table2, BarChart3, AlertTriangle,
   Edit3, Check, X, Loader2,
 } from 'lucide-react'
@@ -93,6 +93,13 @@ export function AppShell() {
     setActiveView('data')
   }
 
+  const handleNewAudit = useCallback(() => {
+    setCurrentSession(null)
+    goHome()
+    setShowNewAudit(true)
+    setActiveView('data')
+  }, [goHome, setCurrentSession, setShowNewAudit])
+
   const hasSession = currentSession !== null
   const showEmptyState = !hasSession && !showNewAudit
 
@@ -106,7 +113,7 @@ export function AppShell() {
           isOpen={sidebarOpen}
           onToggle={toggleSidebar}
           onSessionSelect={handleSessionSelect}
-          onNewAudit={() => { goHome(); setShowNewAudit(true) }}
+          onNewAudit={handleNewAudit}
           onSettings={toggleSettings}
           onLoadSessions={loadSessions}
         />
@@ -135,14 +142,16 @@ export function AppShell() {
                 <WelcomeScreen
                   sessions={sessions}
                   onSessionSelect={handleSessionSelect}
-                  onNewAudit={() => setShowNewAudit(true)}
+                  onNewAudit={handleNewAudit}
                 />
               )}
 
               {showNewAudit && !hasSession && (
-                <div className="flex-1 overflow-y-auto p-6 animate-fade-in-up">
-                  <div className="max-w-4xl mx-auto">
-                    <FileDropZone />
+                <div className="flex-1 min-h-0 overflow-y-auto p-6 animate-fade-in-up">
+                  <div className="min-h-full flex justify-center py-8">
+                    <div className="my-auto w-full max-w-4xl">
+                      <FileDropZone />
+                    </div>
                   </div>
                 </div>
               )}
@@ -157,7 +166,7 @@ export function AppShell() {
                       />
                     </div>
                   )}
-                  <div className="flex-1 min-h-0">
+                  <div className="flex-1 min-h-0 flex overflow-hidden">
                     <DataTable
                       analytics={resolvedAnalytics}
                       isLoading={isLoading}
@@ -364,12 +373,6 @@ function Sidebar({
                         <Clock className="h-2.5 w-2.5" strokeWidth={2} />
                         {new Date(session.updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
                       </span>
-                      {session.transaction_count != null && (
-                        <span className="text-[10px] text-[var(--text-tertiary)] flex items-center gap-0.5">
-                          <Hash className="h-2.5 w-2.5" strokeWidth={2} />
-                          {session.transaction_count}
-                        </span>
-                      )}
                     </div>
                   </>
                 )}

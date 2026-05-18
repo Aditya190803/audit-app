@@ -6,17 +6,31 @@ import { bulkAddTags } from '../lib/api'
 
 export const KeyboardShortcuts: React.FC = () => {
   const { toggleSidebar, toggleSettings, toggleExport, selectedTransactionIds, goHome, setShowNewAudit } = useUIStore()
-  const { refreshCurrentSession, currentSession } = useSessionStore()
+  const { refreshCurrentSession, currentSession, setCurrentSession } = useSessionStore()
 
-  useHotkeys('esc', (e) => { e.preventDefault(); goHome() })
-  useHotkeys('ctrl+n', (e) => { e.preventDefault(); goHome(); setShowNewAudit(true) })
+  const startNewAudit = () => {
+    setCurrentSession(null)
+    goHome()
+    setShowNewAudit(true)
+  }
+
+  useHotkeys('esc', (e) => {
+    e.preventDefault()
+    const { settingsOpen, exportOpen, passwordDialogOpen, closeModals } = useUIStore.getState()
+    if (settingsOpen || exportOpen || passwordDialogOpen) {
+      closeModals()
+      return
+    }
+    goHome()
+  })
+  useHotkeys('ctrl+n', (e) => { e.preventDefault(); startNewAudit() })
   useHotkeys('ctrl+b', (e) => { e.preventDefault(); toggleSidebar() })
   useHotkeys('ctrl+e', (e) => { e.preventDefault(); toggleExport() })
   useHotkeys('ctrl+,', (e) => { e.preventDefault(); toggleSettings() })
   useHotkeys('ctrl+r', (e) => { e.preventDefault(); refreshCurrentSession() })
   useHotkeys('ctrl+f', (e) => { e.preventDefault(); document.querySelector<HTMLInputElement>('[placeholder*="Search"]')?.focus() })
   useHotkeys('ctrl+/', (e) => { e.preventDefault(); toggleSidebar() })
-  useHotkeys('ctrl+shift+n', (e) => { e.preventDefault(); goHome(); setShowNewAudit(true) })
+  useHotkeys('ctrl+shift+n', (e) => { e.preventDefault(); startNewAudit() })
   useHotkeys('ctrl+shift+e', (e) => { e.preventDefault(); if (currentSession) toggleExport() })
   useHotkeys('ctrl+shift+s', (e) => { e.preventDefault(); toggleSettings() })
   useHotkeys('ctrl+shift+r', (e) => { e.preventDefault(); goHome() })

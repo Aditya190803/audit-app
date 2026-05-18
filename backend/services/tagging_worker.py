@@ -112,7 +112,7 @@ def _process_transaction_batch(batch, clients, phone_map, broker_names, alias_li
             if tx.get("amount") and abs(tx.get("amount")) >= suspicious_threshold:
                 reasons.append(f"Amount {tx['amount']} exceeds threshold {suspicious_threshold}")
             if tx["id"] in recurring_map:
-                reasons.append("Recurring transaction to same party")
+                reasons.append(recurring_map.get(tx["id"]) or "Recurring transaction to same party")
             full_text_lower = full_text.lower()
             for keyword in suspicious_keywords:
                 if keyword.lower() in full_text_lower:

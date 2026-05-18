@@ -274,7 +274,7 @@ export const SummaryView: React.FC<SummaryViewProps> = ({ analytics, suspiciousT
                               <td className="px-3 py-2 text-[var(--text-primary)] max-w-[240px] truncate" title={txDisplayName(tx)}>
                                 {txDisplayName(tx)}
                               </td>
-                              <td className={`px-3 py-2 text-right font-mono font-medium ${(tx.amount ?? 0) < 0 ? 'text-[var(--danger)]' : 'text-[var(--text-primary)]'}`}>
+                              <td className={`px-3 py-2 text-right font-mono font-medium ${(tx.amount ?? 0) < 0 ? 'text-[var(--danger)]' : (tx.amount ?? 0) > 0 ? 'text-[var(--success)]' : 'text-[var(--text-primary)]'}`}>
                                 {tx.amount != null ? `₹${Math.abs(tx.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '–'}
                               </td>
                               <td className="px-3 py-2">

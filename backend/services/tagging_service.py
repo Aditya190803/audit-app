@@ -235,9 +235,9 @@ class TaggingService:
         
         return new_tags
     
-    def _detect_recurring(self, transactions: List[Transaction], window_days: int) -> set:
+    def _detect_recurring(self, transactions: List[Transaction], window_days: int) -> Dict[int, str]:
         """Detect recurring transactions by amount and party within a date window."""
-        recurring = set()
+        recurring: Dict[int, str] = {}
         groups = defaultdict(list)
         
         def _parse_date(d: str | None):
@@ -249,6 +249,22 @@ class TaggingService:
                 except ValueError:
                     continue
             return None
+
+        def _format_date(d: str | None) -> str:
+            parsed = _parse_date(d)
+            if not parsed:
+                return d or "unknown date"
+            return f"{parsed.day} {parsed.strftime('%b %Y')}"
+
+        def _format_amount(amount: float | None) -> str:
+            if amount is None:
+                return "unknown amount"
+            return f"₹{abs(amount):,.2f}"
+
+        def _format_direction(amount: float | None) -> str:
+            if amount is None:
+                return "transaction"
+            return "debit" if amount < 0 else "credit"
         
         for tx in transactions:
             if tx.amount and tx.party_name:
@@ -256,17 +272,36 @@ class TaggingService:
                 key = (round(tx.amount, 2), self.fuzzy.normalize_text(tx.party_name))
                 groups[key].append(tx)
         
-        for key, txs in groups.items():
+        for _key, txs in groups.items():
             if len(txs) < 2:
                 continue
             sorted_txs = sorted(txs, key=lambda t: _parse_date(t.date) or datetime.min)
+            recurring_ids = set()
             for i in range(len(sorted_txs)):
                 for j in range(i + 1, len(sorted_txs)):
                     d1 = _parse_date(sorted_txs[i].date)
                     d2 = _parse_date(sorted_txs[j].date)
                     if d1 and d2 and abs((d2 - d1).days) <= window_days:
-                        recurring.add(sorted_txs[i].id)
-                        recurring.add(sorted_txs[j].id)
+                        recurring_ids.add(sorted_txs[i].id)
+                        recurring_ids.add(sorted_txs[j].id)
+
+            if len(recurring_ids) < 2:
+                continue
+
+            recurring_txs = [tx for tx in sorted_txs if tx.id in recurring_ids]
+            sample = recurring_txs[0]
+            party = sample.party_name or "same party"
+            date_list = ", ".join(_format_date(tx.date) for tx in recurring_txs[:4])
+            if len(recurring_txs) > 4:
+                date_list += f", +{len(recurring_txs) - 4} more"
+
+            reason = (
+                f"Recurring {_format_direction(sample.amount)} of {_format_amount(sample.amount)} "
+                f"with {party}: {len(recurring_txs)} matching transactions "
+                f"({date_list})"
+            )
+            for tx in recurring_txs:
+                recurring[tx.id] = reason
         
         return recurring
     

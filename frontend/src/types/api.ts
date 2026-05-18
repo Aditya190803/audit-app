@@ -115,4 +115,4 @@ export interface ParseProgress {
 }
 
 export type ExportType = 'all' | 'client' | 'broker' | 'suspicious' | 'tagged'
-export type ExportFormat = 'excel' | 'pdf-highlight'
+export type ExportFormat = 'excel'

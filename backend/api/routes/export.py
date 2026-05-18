@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import Optional, List
+from typing import Optional
 from backend.database import get_db
-from backend.services.session_service import SessionService, resolve_pdf_paths
+from backend.services.session_service import SessionService
 from backend.services.export_service import ExportService
 import json
 import os
@@ -31,8 +31,13 @@ def _filter_export_transactions(transactions, export_type: str, transaction_ids_
 router = APIRouter(prefix="/export", tags=["export"])
 
 def _ensure_export_path(file_path: str) -> str:
+    requested_path = Path(file_path).expanduser()
+    if requested_path.is_absolute():
+        requested_path.parent.mkdir(parents=True, exist_ok=True)
+        return str(requested_path)
+
     os.makedirs(EXPORT_DIR, exist_ok=True)
-    safe = Path(file_path).name
+    safe = requested_path.name
     return os.path.join(EXPORT_DIR, safe)
 
 @router.post("/excel/{session_id}")
@@ -46,20 +51,3 @@ def export_excel(session_id: int, export_type: str = "all", file_path: Optional[
     export_service = ExportService(db)
     export_service.export_excel(transactions, output_path, session.name if session else "Audit")
     return {"file_path": output_path, "count": len(transactions)}
-
-@router.post("/pdf-highlight/{session_id}")
-def export_highlighted_pdf(session_id: int, file_path: Optional[str] = None, password: Optional[str] = None, transaction_ids: Optional[str] = Query(None), db: Session = Depends(get_db)):
-    session_service = SessionService(db)
-    session = session_service.get_session(session_id)
-    if not session or not session.pdf_path:
-        raise HTTPException(status_code=404, detail="Session or PDF not found")
-    
-    transactions = _filter_export_transactions(session_service.get_transactions(session_id), "all", transaction_ids)
-    output_path = _ensure_export_path(file_path or f"highlighted_{session_id}.pdf")
-    
-    pdf_paths = resolve_pdf_paths(session.pdf_path)
-    if not pdf_paths:
-        raise HTTPException(status_code=404, detail="Session or PDF not found")
-    export_service = ExportService(db)
-    export_service.export_highlighted_pdf(transactions, pdf_paths, output_path, password)
-    return {"file_path": output_path}

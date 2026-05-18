@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
-import { X, Download, FileSpreadsheet, FileImage } from 'lucide-react'
+import { X, Download, FileSpreadsheet } from 'lucide-react'
 import type { ExportFormat } from '../types/api'
 import { exportFile } from '../lib/api'
+import { useUIStore } from '../stores/uiStore'
 
 interface ExportPanelProps {
   isOpen: boolean
@@ -11,13 +12,13 @@ interface ExportPanelProps {
 }
 
 const EXPORT_FORMATS: { value: ExportFormat; label: string; icon: React.ReactNode }[] = [
-  { value: 'excel', label: 'Excel Workbook', icon: <FileSpreadsheet className="h-4 w-4" strokeWidth={1.5} /> },
-  { value: 'pdf-highlight', label: 'Highlighted PDF', icon: <FileImage className="h-4 w-4" strokeWidth={1.5} /> }
+  { value: 'excel', label: 'Excel Workbook', icon: <FileSpreadsheet className="h-4 w-4" strokeWidth={1.5} /> }
 ]
 
 export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessionId }) => {
   const [selectedFormat, setSelectedFormat] = useState<ExportFormat>('excel')
   const [isExporting, setIsExporting] = useState(false)
+  const pushToast = useUIStore((s) => s.pushToast)
 
   if (!isOpen) return null
 
@@ -26,16 +27,17 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessi
     setIsExporting(true)
     try {
       const { showSaveDialog } = window.electronAPI
-      const defaultExt = selectedFormat === 'excel' ? 'xlsx' : 'pdf'
-      const filters = [{ name: defaultExt.toUpperCase(), extensions: [defaultExt] }]
+      const defaultExt = 'xlsx'
+      const filters = [{ name: 'EXCEL', extensions: ['xlsx'] }]
 
       const result = await showSaveDialog({
-        defaultPath: selectedFormat === 'excel' ? `audit_workbook.${defaultExt}` : `highlighted_statement.${defaultExt}`,
+        defaultPath: `audit_workbook.${defaultExt}`,
         filters
       })
 
       if (!result.canceled && result.filePath) {
         await exportFile(sessionId, 'all', selectedFormat, result.filePath)
+        pushToast({ message: `Export complete: ${result.filePath.split(/[\\/]/).pop() || result.filePath}` })
         onClose()
       }
     } catch (e) {
@@ -68,7 +70,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessi
 
           <div>
             <label className="block text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider mb-2">Format</label>
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-1 gap-1.5">
               {EXPORT_FORMATS.map((fmt) => (
                 <button
                   key={fmt.value}
