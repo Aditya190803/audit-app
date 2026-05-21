@@ -19,6 +19,13 @@ from backend.services.parsers.hdfc_bank import HDFCBankParser
 from backend.services.parsers.union_bank import UnionBankParser
 from backend.services.parsers.sbi_standard import SBIStandardParser
 from backend.services.parsers.sbi_compact import SBICompactParser
+from backend.services.parsers.pnb_bank import PNBBankParser
+from backend.services.parsers.bank_of_baroda import BankOfBarodaParser
+from backend.services.parsers.yes_bank import YesBankParser
+from backend.services.parsers.canara_bank import CanaraBankParser
+from backend.services.parsers.indusind_bank import IndusIndBankParser
+from backend.services.parsers.standard_chartered import StandardCharteredParser
+from backend.services.parsers.rbl_bank import RBLBankParser
 from backend.services.parsers import registry
 from backend.brokers_list import BROKERS
 
@@ -225,6 +232,13 @@ class AccuracyTests(unittest.TestCase):
         self.assertIn("axis_bank", names)
         self.assertIn("idfc_bank", names)
         self.assertIn("hdfc_bank", names)
+        self.assertIn("pnb_bank", names)
+        self.assertIn("bank_of_baroda", names)
+        self.assertIn("yes_bank", names)
+        self.assertIn("canara_bank", names)
+        self.assertIn("indusind_bank", names)
+        self.assertIn("standard_chartered", names)
+        self.assertIn("rbl_bank", names)
 
     def test_axis_bank_detects_table(self):
         parser = AxisBankParser()
@@ -255,6 +269,139 @@ class AccuracyTests(unittest.TestCase):
         self.assertIsNotNone(tx)
         self.assertEqual(tx["amount"], 100000.0)
         self.assertIn("Kotak Securities", tx["party_name"])
+
+    def test_pnb_bank_detects_table_with_identity(self):
+        parser = PNBBankParser()
+        tables = [{
+            "data": [["Transaction\nDate", "Cheque\nNumber", "Withdrawal", "Deposit", "Balance", "Narration"]],
+            "page_number": 1,
+        }]
+        pages = [{"text": "Punjab National Bank Account Statement IFSC Code: PUNB0149220"}]
+        score = parser.detect(tables, pages)
+        self.assertGreater(score, 0.9)
+
+    def test_pnb_bank_extract_row(self):
+        parser = PNBBankParser()
+        col_indices = {"date": 0, "cheque": 1, "debit": 2, "credit": 3, "balance": 4, "description": 5}
+        row = ["08/03/2025", "", "20.00", "", "9,907.21 Cr.", "UPI/101137725054/P2M/q018556816@ybl/SANDHYA RANI PU"]
+        tx = parser._extract_row(row, col_indices)
+        self.assertIsNotNone(tx)
+        self.assertEqual(tx["amount"], -20.0)
+        self.assertIn("SANDHYA RANI", tx["party_name"])
+
+    def test_bank_of_baroda_detects_table_with_identity(self):
+        parser = BankOfBarodaParser()
+        tables = [{
+            "data": [["Date", "Description", "Ref No. / Cheque No.", "Debit", "Credit", "Balance"]],
+            "page_number": 1,
+        }]
+        pages = [{"text": "Bank of Baroda Account Statement IFSC BARB0CON123"}]
+        score = parser.detect(tables, pages)
+        self.assertGreater(score, 0.9)
+
+    def test_bank_of_baroda_extract_row(self):
+        parser = BankOfBarodaParser()
+        col_indices = {"date": 0, "description": 1, "reference": 2, "debit": 3, "credit": 4, "balance": 5}
+        row = ["09-Sep-25", "Salary Credit - INFOSYS LTD", "NEFT/IN456728", "", "35,000.00", "60,580.00"]
+        tx = parser._extract_row(row, col_indices)
+        self.assertIsNotNone(tx)
+        self.assertEqual(tx["amount"], 35000.0)
+        self.assertIn("INFOSYS", tx["party_name"])
+
+    def test_yes_bank_detects_table_with_identity(self):
+        parser = YesBankParser()
+        tables = [{
+            "data": [["Transaction\nDate", "Value Date", "Description", "Withdrawals", "Deposits", "Balance"]],
+            "page_number": 1,
+        }]
+        pages = [{"text": "YES Bank Statement of Accounts IFSC YESB0000988"}]
+        score = parser.detect(tables, pages)
+        self.assertGreater(score, 0.9)
+
+    def test_yes_bank_extract_row(self):
+        parser = YesBankParser()
+        col_indices = {"date": 0, "value_date": 1, "description": 2, "debit": 3, "credit": 4, "balance": 5}
+        row = ["01-04-2023", "01-04-2023", "PCA:0100857961:000981999769795:DHARAM CHAND BAKERS", "15,500.00", "0.00", "80,288.18"]
+        tx = parser._extract_row(row, col_indices)
+        self.assertIsNotNone(tx)
+        self.assertEqual(tx["amount"], -15500.0)
+        self.assertEqual(tx["party_name"], "DHARAM CHAND BAKERS")
+
+    def test_canara_bank_detects_table_with_identity(self):
+        parser = CanaraBankParser()
+        tables = [{
+            "data": [["TRANS", "VALUE", "BRANCH", "REF/CHQ.NO", "DESCRIPTION", "WITHDRAWS", "DEPOSIT", "BALANCE"]],
+            "page_number": 1,
+        }]
+        pages = [{"text": "Canara Bank Account Statement IFSC CNRB0004038"}]
+        score = parser.detect(tables, pages)
+        self.assertGreater(score, 0.9)
+
+    def test_canara_bank_extract_row(self):
+        parser = CanaraBankParser()
+        col_indices = {"date": 0, "value_date": 1, "branch": 2, "reference": 3, "description": 4, "debit": 5, "credit": 6, "balance": 7}
+        row = ["01-05-2024", "01-05-2024", "4038", "412345678901", "UPI/DR/412345678901/RAMESH STORES/CNRB/ramesh@cnrb", "500.00", "", "1,866.46"]
+        tx = parser._extract_row(row, col_indices)
+        self.assertIsNotNone(tx)
+        self.assertEqual(tx["amount"], -500.0)
+        self.assertIn("RAMESH STORES", tx["party_name"])
+
+    def test_indusind_bank_detects_table_with_identity(self):
+        parser = IndusIndBankParser()
+        tables = [{
+            "data": [["Date", "Particulars", "Chq./Ref.", "Withdrawl", "Deposit", "Balance"]],
+            "page_number": 1,
+        }]
+        pages = [{"text": "IndusInd Bank Statement of Account"}]
+        score = parser.detect(tables, pages)
+        self.assertGreater(score, 0.9)
+
+    def test_indusind_bank_extract_row(self):
+        parser = IndusIndBankParser()
+        col_indices = {"date": 0, "description": 1, "reference": 2, "debit": 3, "credit": 4, "balance": 5}
+        row = ["08-Jun-2025", "UPI/102783902476/DR/MD S/CNRB/7384395246@ybl/Payme", "S27130712", "20,612", "", "21,045.72"]
+        tx = parser._extract_row(row, col_indices)
+        self.assertIsNotNone(tx)
+        self.assertEqual(tx["amount"], -20612.0)
+        self.assertEqual(tx["party_name"], "MD S")
+
+    def test_standard_chartered_detects_table_with_identity(self):
+        parser = StandardCharteredParser()
+        tables = [{
+            "data": [["Date", "Description", "Withdrawal", "Deposit", "Balance"]],
+            "page_number": 1,
+        }]
+        pages = [{"text": "Statement of Account Branch : STANDARD CHARTERED BANK"}]
+        score = parser.detect(tables, pages)
+        self.assertGreater(score, 0.9)
+
+    def test_standard_chartered_extract_row(self):
+        parser = StandardCharteredParser()
+        col_indices = {"date": 0, "description": 1, "debit": 2, "credit": 3, "balance": 4}
+        row = ["26 Feb 2025", "PIKMIMIN02A00002 K2M IMPEX PRIVATE LIMITED|HDFC BANK 505712062191|IMPS|P2A|HDFC0004191|50200041425817", "100.00", "", "59,245.39"]
+        tx = parser._extract_row(row, col_indices)
+        self.assertIsNotNone(tx)
+        self.assertEqual(tx["amount"], -100.0)
+        self.assertIn("K2M IMPEX", tx["party_name"])
+
+    def test_rbl_bank_detects_table_with_identity(self):
+        parser = RBLBankParser()
+        tables = [{
+            "data": [["Date", "Narration", "Withdrawals (Dr)", "Deposits (Cr)", "Balance (INR)"]],
+            "page_number": 1,
+        }]
+        pages = [{"text": "RBL Bank Account Statement IFSC RATN0000111"}]
+        score = parser.detect(tables, pages)
+        self.assertGreater(score, 0.9)
+
+    def test_rbl_bank_extract_row(self):
+        parser = RBLBankParser()
+        col_indices = {"date": 0, "description": 1, "debit": 2, "credit": 3, "balance": 4}
+        row = ["12/01/2024", "UPI/DR/401212345678/AMIT TRADERS/RATN/amit@rbl", "750.00", "", "44,250.00"]
+        tx = parser._extract_row(row, col_indices)
+        self.assertIsNotNone(tx)
+        self.assertEqual(tx["amount"], -750.0)
+        self.assertEqual(tx["party_name"], "AMIT TRADERS")
 
     def test_hdfc_bank_detects_table(self):
         parser = HDFCBankParser()

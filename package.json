@@ -11,14 +11,16 @@
     "build": "electron-vite build",
     "build:python": "node scripts/build-python.js",
     "preview": "electron-vite preview",
-    "dist": "bun run build && bun run build:python && electron-builder",
-    "dist:win": "bun run build && bun run build:python && electron-builder --win",
+    "dist": "bun run verify:prod && electron-builder",
+    "dist:win": "bun run verify:prod && electron-builder --win",
     "postinstall": "electron-builder install-app-deps",
     "typecheck": "tsc --noEmit",
     "typecheck:watch": "tsc --noEmit --watch",
-    "test:frontend": "echo 'No frontend tests defined yet'",
-    "test:backend": "python -m pytest backend/tests",
-    "test": "bun run typecheck && bun run test:frontend && bun run test:backend"
+    "test:frontend": "node scripts/test-frontend-smoke.js",
+    "test:backend": "node scripts/test-backend.js",
+    "test": "bun run typecheck && bun run test:frontend && bun run test:backend",
+    "verify:prod": "node scripts/verify-production.js",
+    "review:coderabbit": "coderabbit review --agent --base master"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",

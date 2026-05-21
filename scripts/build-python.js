@@ -1,23 +1,9 @@
 const { execFileSync } = require('child_process')
 const fs = require('fs')
 const path = require('path')
+const { REQUIRED_BACKEND_MODULES, resolvePythonBin } = require('./lib/python-env')
 
 const RESOURCES_DIR = path.join(__dirname, '..', 'resources', 'python-dist')
-function firstExisting(paths) {
-  return paths.find((candidate) => fs.existsSync(candidate))
-}
-
-const PYTHON_BIN = process.env.PYTHON || firstExisting(
-  process.platform === 'win32'
-    ? [
-        path.join(__dirname, '..', '.venv', 'Scripts', 'python.exe'),
-        path.join(__dirname, '..', 'backend', 'venv', 'Scripts', 'python.exe')
-      ]
-    : [
-        path.join(__dirname, '..', '.venv', 'bin', 'python'),
-        path.join(__dirname, '..', 'backend', 'venv', 'bin', 'python')
-      ]
-)
 
 function main() {
   console.log('[Build] Starting Python backend build...')
@@ -28,8 +14,11 @@ function main() {
   }
   fs.mkdirSync(RESOURCES_DIR, { recursive: true })
 
-  if (!PYTHON_BIN) {
-    console.error('[Build] Python virtual environment not found. Create .venv or backend/venv, or set PYTHON.')
+  let pythonBin
+  try {
+    pythonBin = resolvePythonBin({ requiredModules: [...REQUIRED_BACKEND_MODULES, 'PyInstaller'] })
+  } catch (error) {
+    console.error(`[Build] ${error.message}`)
     process.exit(1)
   }
 
@@ -54,6 +43,7 @@ function main() {
     '--hidden-import', 'uvicorn.lifespan.on',
     '--hidden-import', 'sqlalchemy.ext.baked',
     '--hidden-import', 'alembic',
+    '--hidden-import', 'aiosqlite',
     '--hidden-import', 'pandas._libs.tslibs.np_datetime',
     '--hidden-import', 'pandas._libs.tslibs.timedeltas',
     '--hidden-import', 'fitz',
@@ -84,10 +74,11 @@ function main() {
     path.join(__dirname, '..', 'backend', 'main.py')
   ]
 
-  console.log('[Build] Running:', PYTHON_BIN, pyinstallerArgs.join(' '))
+  console.log('[Build] Using Python:', pythonBin)
+  console.log('[Build] Running:', pythonBin, pyinstallerArgs.join(' '))
 
   try {
-    execFileSync(PYTHON_BIN, pyinstallerArgs, { stdio: 'inherit' })
+    execFileSync(pythonBin, pyinstallerArgs, { stdio: 'inherit' })
     console.log('[Build] Python backend built successfully!')
   } catch (error) {
     console.error('[Build] PyInstaller failed:', error)

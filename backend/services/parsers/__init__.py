@@ -8,6 +8,13 @@ from backend.services.parsers.icici_numbered import ICICINumberedParser
 from backend.services.parsers.axis_bank import AxisBankParser
 from backend.services.parsers.idfc_bank import IDFCBankParser
 from backend.services.parsers.hdfc_bank import HDFCBankParser
+from backend.services.parsers.pnb_bank import PNBBankParser
+from backend.services.parsers.bank_of_baroda import BankOfBarodaParser
+from backend.services.parsers.yes_bank import YesBankParser
+from backend.services.parsers.canara_bank import CanaraBankParser
+from backend.services.parsers.indusind_bank import IndusIndBankParser
+from backend.services.parsers.standard_chartered import StandardCharteredParser
+from backend.services.parsers.rbl_bank import RBLBankParser
 from backend.services.parsers.generic import GenericParser
 
 
@@ -56,4 +63,11 @@ registry.register(ICICINumberedParser)
 registry.register(AxisBankParser)
 registry.register(IDFCBankParser)
 registry.register(HDFCBankParser)
+registry.register(PNBBankParser)
+registry.register(BankOfBarodaParser)
+registry.register(YesBankParser)
+registry.register(CanaraBankParser)
+registry.register(IndusIndBankParser)
+registry.register(StandardCharteredParser)
+registry.register(RBLBankParser)
 registry.register(GenericParser)
