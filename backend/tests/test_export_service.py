@@ -1,12 +1,14 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from openpyxl import load_workbook
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.api.routes.export import _ensure_export_path
+import backend.api.routes.export as export_route
+from backend.security import export_path_token
 from backend.database import Base
 from backend.models import AuditSession, Tag, Transaction
 from backend.services.export_service import ExportService
@@ -21,12 +23,23 @@ class ExportServiceTests(unittest.TestCase):
     def tearDown(self):
         self.db.close()
 
-    def test_export_route_preserves_absolute_save_dialog_path(self):
+    def test_export_route_rejects_unapproved_absolute_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             output_xlsx = os.path.join(tmpdir, "nested", "audit.xlsx")
 
-            self.assertEqual(_ensure_export_path(output_xlsx), output_xlsx)
-            self.assertTrue(os.path.isdir(os.path.dirname(output_xlsx)))
+            with patch.object(export_route, "EXPORT_DIR", os.path.join(tmpdir, "exports")):
+                with self.assertRaises(Exception):
+                    export_route._ensure_export_path(output_xlsx)
+
+    def test_export_route_accepts_save_dialog_approved_absolute_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_xlsx = os.path.join(tmpdir, "nested", "audit.xlsx")
+
+            with patch.dict(os.environ, {"AUDIT_EXPORT_PATH_SECRET": "test-secret"}):
+                with patch.object(export_route, "EXPORT_DIR", os.path.join(tmpdir, "exports")):
+                    token = export_path_token(output_xlsx)
+                    self.assertEqual(export_route._ensure_export_path(output_xlsx, token), os.path.realpath(output_xlsx))
+                    self.assertTrue(os.path.isdir(os.path.dirname(output_xlsx)))
 
     def test_excel_export_creates_required_workbook_sheets(self):
         with tempfile.TemporaryDirectory() as tmpdir:

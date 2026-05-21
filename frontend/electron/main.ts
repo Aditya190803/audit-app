@@ -4,12 +4,15 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import getPort from 'get-port'
 import fs from 'node:fs'
+import crypto from 'node:crypto'
 import { autoUpdater, type UpdateInfo } from 'electron-updater'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const APP_ROOT = findProjectRoot(__dirname)
 
 let pythonProcess: ReturnType<typeof spawn> | null = null
 let backendPort: number = 0
+let backendToken = crypto.randomBytes(32).toString('hex')
+let exportPathSecret = crypto.randomBytes(32).toString('hex')
 let updateStatus: UpdateStatus = {
   status: 'idle',
   message: 'Updates have not been checked yet.'
@@ -84,6 +87,23 @@ function readGitHubUpdateToken(): string | null {
     readOptionalTextFile(path.join(app.getPath('userData'), 'github-update-token')) ||
     null
   )
+}
+
+function dataPath(...segments: string[]): string {
+  return app.isPackaged
+    ? path.join(app.getPath('userData'), ...segments)
+    : path.join(APP_ROOT, ...segments)
+}
+
+function canonicalPath(filePath: string): string {
+  return path.resolve(filePath)
+}
+
+function exportPathToken(filePath: string): string {
+  return crypto
+    .createHmac('sha256', exportPathSecret)
+    .update(canonicalPath(filePath))
+    .digest('hex')
 }
 
 function isTruthyEnv(value?: string): boolean {
@@ -190,7 +210,12 @@ export const RENDERER_DIST = path.join(APP_ROOT, 'out', 'renderer')
 
 function resolveBackendPath(): { command: string; args: string[]; cwd: string } {
   if (app.isPackaged) {
-    const exePath = path.join(process.resourcesPath, 'backend', 'backend.exe')
+    const executableName = process.platform === 'win32' ? 'backend.exe' : 'backend'
+    const candidates = [
+      path.join(process.resourcesPath, 'backend', executableName),
+      path.join(process.resourcesPath, 'backend', 'backend', executableName)
+    ]
+    const exePath = candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0]
     return { command: exePath, args: [], cwd: path.dirname(exePath) }
   } else {
     const pythonPath = process.platform === 'win32'
@@ -218,6 +243,14 @@ async function startPythonBackend(port: number): Promise<void> {
       AUDIT_DB_PATH: app.isPackaged
         ? path.join(app.getPath('userData'), 'audit.db')
         : undefined,
+      AUDIT_UPLOAD_DIR: dataPath('uploads'),
+      AUDIT_EXPORT_DIR: dataPath('exports'),
+      AUDIT_API_TOKEN: backendToken,
+      AUDIT_EXPORT_PATH_SECRET: exportPathSecret,
+      AUDIT_DISABLE_DOCS: app.isPackaged ? '1' : undefined,
+      AUDIT_ALLOWED_ORIGINS: VITE_DEV_SERVER_URL
+        ? VITE_DEV_SERVER_URL.replace(/\/$/, '')
+        : 'file://,null',
       TESSDATA_PREFIX: app.isPackaged
         ? path.join(process.resourcesPath, 'tesseract', 'tessdata')
         : undefined
@@ -312,6 +345,7 @@ async function createWindow(): Promise<void> {
 
 // IPC handlers
 ipcMain.handle('get-backend-port', () => backendPort)
+ipcMain.handle('get-backend-config', () => ({ port: backendPort, token: backendToken }))
 
 ipcMain.handle('read-example-files', async () => {
   const exampleDir = path.join(APP_ROOT, 'example')
@@ -345,14 +379,19 @@ ipcMain.handle('read-example-files', async () => {
 const ALLOWED_EXTENSIONS = new Set(['.pdf', '.xlsx', '.xls', '.csv'])
 const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB
 
+function isWithinRoot(filePath: string, root: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(filePath))
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+}
+
 ipcMain.handle('read-file-base64', async (_event, filePath: string) => {
   try {
     const resolvedPath = path.isAbsolute(filePath) ? filePath : path.join(APP_ROOT, filePath)
     const resolved = path.resolve(resolvedPath)
 
-    // Only allow files within APP_ROOT
-    if (!resolved.startsWith(APP_ROOT)) {
-      console.error(`[Main] Blocked read outside APP_ROOT: ${resolved}`)
+    const allowedRoots = [APP_ROOT, dataPath('uploads'), dataPath('exports')]
+    if (!allowedRoots.some((root) => isWithinRoot(resolved, root))) {
+      console.error(`[Main] Blocked read outside allowed roots: ${resolved}`)
       return null
     }
 
@@ -392,7 +431,11 @@ ipcMain.handle('select-file', async (_event, options: { filters?: Electron.FileF
 
 ipcMain.handle('show-save-dialog', async (_event, options: { defaultPath?: string; filters?: Electron.FileFilter[] }) => {
   const result = await dialog.showSaveDialog(options)
-  return result
+  if (result.canceled || !result.filePath) return result
+  return {
+    ...result,
+    exportPathToken: exportPathToken(result.filePath)
+  }
 })
 
 ipcMain.handle('get-app-version', () => app.getVersion())

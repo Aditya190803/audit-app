@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from enum import Enum
@@ -34,13 +34,12 @@ class TransactionCreate(TransactionBase):
     session_id: int
 
 class TransactionResponse(TransactionBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     session_id: int
     created_at: datetime
-    tags: List["TagResponse"] = []
-    
-    class Config:
-        from_attributes = True
+    tags: List["TagResponse"] = Field(default_factory=list)
 
 class TagBase(BaseModel):
     tag_type: TagType
@@ -53,27 +52,25 @@ class TagCreate(TagBase):
     transaction_id: int
 
 class TagResponse(TagBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     transaction_id: int
     created_at: datetime
-    
-    class Config:
-        from_attributes = True
 
 class BrokerBase(BaseModel):
     name: str
-    aliases: List[str] = []
+    aliases: List[str] = Field(default_factory=list)
     is_active: bool = True
 
 class BrokerCreate(BrokerBase):
     pass
 
 class BrokerResponse(BrokerBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
-    
-    class Config:
-        from_attributes = True
 
 class AliasBase(BaseModel):
     canonical_name: str
@@ -83,11 +80,10 @@ class AliasCreate(AliasBase):
     pass
 
 class AliasResponse(AliasBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
-    
-    class Config:
-        from_attributes = True
 
 class AuditLogBase(BaseModel):
     action: AuditAction
@@ -101,31 +97,29 @@ class AuditLogCreate(AuditLogBase):
     session_id: Optional[int] = None
 
 class AuditLogResponse(AuditLogBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     session_id: Optional[int] = None
     timestamp: datetime
-    
-    class Config:
-        from_attributes = True
 
 class AuditSessionBase(BaseModel):
     name: Optional[str] = None
     status: str = "active"
     pdf_path: Optional[str] = None
     csv_path: Optional[str] = None
-    settings_snapshot: Dict[str, Any] = {}
+    settings_snapshot: Dict[str, Any] = Field(default_factory=dict)
 
 class AuditSessionCreate(AuditSessionBase):
     pass
 
 class AuditSessionResponse(AuditSessionBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
     updated_at: datetime
     transaction_count: int = 0
-    
-    class Config:
-        from_attributes = True
 
 class ConfigItem(BaseModel):
     key: str
@@ -133,24 +127,22 @@ class ConfigItem(BaseModel):
     category: str = "general"
 
 class ConfigResponse(ConfigItem):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
-    
-    class Config:
-        from_attributes = True
 
 class BankProfileBase(BaseModel):
     name: str
-    parser_rules_json: Dict[str, Any] = {}
+    parser_rules_json: Dict[str, Any] = Field(default_factory=dict)
 
 class BankProfileCreate(BankProfileBase):
     pass
 
 class BankProfileResponse(BankProfileBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
-    
-    class Config:
-        from_attributes = True
 
 class BulkTagRequest(BaseModel):
     transaction_ids: List[int]

@@ -148,13 +148,6 @@ class TaggingService:
         # Build phone number map from client list (exact match only, no fuzzy)
         phone_map = self._build_phone_map(clients)
         
-        # Clear existing auto-tags
-        self.db.query(Tag).filter(
-            Tag.transaction_id.in_([t.id for t in transactions]),
-            Tag.is_manual == False
-        ).delete(synchronize_session=False)
-        self.db.flush()
-        
         # Detect recurring transactions
         recurring_map = self._detect_recurring(transactions, recurring_window)
         
@@ -183,6 +176,7 @@ class TaggingService:
         completed = 0
         total_transactions = len(transactions)
         
+        worker_errors = []
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
             batch_sizes = {i: len(b) for i, b in enumerate(batches)}
             futures = {
@@ -202,12 +196,23 @@ class TaggingService:
                     if progress_callback:
                         progress_callback(min(completed, total_transactions), total_transactions)
                 except Exception as e:
+                    worker_errors.append(e)
                     print(f"[TaggingService] Worker failed: {e}")
-        
+
+        if worker_errors:
+            self.db.rollback()
+            raise RuntimeError(f"Auto-tagging failed in {len(worker_errors)} worker batch(es)")
+
         # Bulk insert tags for massive speedup
         new_tags = []
         if all_tags_data:
             from sqlalchemy import insert
+            # Replace auto-tags only after all workers have succeeded.
+            self.db.query(Tag).filter(
+                Tag.transaction_id.in_([t.id for t in transactions]),
+                Tag.is_manual == False
+            ).delete(synchronize_session=False)
+            self.db.flush()
             # Bulk insert mapping
             tag_mappings = []
             for td in all_tags_data:
@@ -224,6 +229,11 @@ class TaggingService:
             # Using core insert to be extremely fast, then we query them back
             if tag_mappings:
                 self.db.execute(insert(Tag), tag_mappings)
+        else:
+            self.db.query(Tag).filter(
+                Tag.transaction_id.in_([t.id for t in transactions]),
+                Tag.is_manual == False
+            ).delete(synchronize_session=False)
                 
         self.db.commit()
         

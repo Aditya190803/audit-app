@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:watch": "tsc --noEmit --watch",
     "test:frontend": "echo 'No frontend tests defined yet'",
-    "test:backend": "cd backend && python -m pytest || echo 'No backend tests found'",
+    "test:backend": "python -m pytest backend/tests",
     "test": "bun run typecheck && bun run test:frontend && bun run test:backend"
   },
   "dependencies": {

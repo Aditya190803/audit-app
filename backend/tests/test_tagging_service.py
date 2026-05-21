@@ -1,10 +1,11 @@
 import unittest
+from unittest.mock import patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend.database import Base
-from backend.models import Transaction
+from backend.models import Tag, Transaction
 from backend.services.tagging_service import TaggingService
 from backend.services.tagging_worker import _process_transaction_batch
 
@@ -57,3 +58,51 @@ class TaggingServiceTests(unittest.TestCase):
 
         self.assertEqual(tags[0]["tag_type"], "suspicious")
         self.assertEqual(tags[0]["reason"], reason)
+
+    def test_auto_tag_worker_failure_keeps_existing_auto_tags(self):
+        tx = Transaction(session_id=1, date="2026-01-01", amount=-1000, party_name="CLIENT ONE")
+        self.db.add(tx)
+        self.db.commit()
+        self.db.refresh(tx)
+
+        existing = Tag(
+            transaction_id=tx.id,
+            tag_type="client",
+            confidence=1.0,
+            reason="existing auto tag",
+            source="auto",
+            is_manual=False,
+        )
+        self.db.add(existing)
+        self.db.commit()
+        self.db.refresh(existing)
+
+        class FailingFuture:
+            def result(self):
+                raise RuntimeError("worker failed")
+
+        class FailingExecutor:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def submit(self, *args, **kwargs):
+                return FailingFuture()
+
+        with patch("concurrent.futures.ProcessPoolExecutor", FailingExecutor):
+            with patch("concurrent.futures.as_completed", lambda futures: list(futures)):
+                with self.assertRaises(RuntimeError):
+                    TaggingService(self.db).auto_tag_session(
+                        session_id=1,
+                        clients=[{"name": "CLIENT ONE", "raw_data": {}}],
+                    )
+
+        remaining = self.db.query(Tag).filter(Tag.transaction_id == tx.id).all()
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(remaining[0].id, existing.id)
+        self.assertEqual(remaining[0].reason, "existing auto tag")

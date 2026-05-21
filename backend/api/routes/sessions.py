@@ -22,6 +22,14 @@ def list_sessions(db: Session = Depends(get_db)):
     service = SessionService(db)
     return service.get_all_sessions()
 
+@router.get("/recovery")
+def get_recovery_session(db: Session = Depends(get_db)):
+    service = SessionService(db)
+    session = service.get_crash_recovery_session()
+    if session:
+        return {"found": True, "session": AuditSessionResponse.model_validate(session)}
+    return {"found": False}
+
 @router.get("/{session_id}", response_model=AuditSessionResponse)
 def get_session(session_id: int, db: Session = Depends(get_db)):
     service = SessionService(db)
@@ -49,11 +57,3 @@ def delete_session(session_id: int, db: Session = Depends(get_db)):
     if service.delete_session(session_id):
         return {"message": "Session deleted"}
     raise HTTPException(status_code=404, detail="Session not found")
-
-@router.get("/recovery")
-def get_recovery_session(db: Session = Depends(get_db)):
-    service = SessionService(db)
-    session = service.get_crash_recovery_session()
-    if session:
-        return {"found": True, "session": AuditSessionResponse.model_validate(session)}
-    return {"found": False}

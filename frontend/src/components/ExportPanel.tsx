@@ -36,7 +36,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessi
       })
 
       if (!result.canceled && result.filePath) {
-        await exportFile(sessionId, 'all', selectedFormat, result.filePath)
+        await exportFile(sessionId, 'all', selectedFormat, result.filePath, undefined, result.exportPathToken)
         pushToast({ message: `Export complete: ${result.filePath.split(/[\\/]/).pop() || result.filePath}` })
         onClose()
       }

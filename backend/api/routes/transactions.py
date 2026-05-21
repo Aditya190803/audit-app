@@ -12,7 +12,6 @@ from backend.services.config_service import ConfigService
 from backend.services.audit_service import AuditService
 from backend.services.payment_method import detect_payment_method
 import os
-import shutil
 import json
 import time
 import uuid
@@ -25,6 +24,10 @@ _progress_lock = Lock()
 _parse_progress = {}
 
 PROGRESS_TTL = 3600  # 1 hour
+UPLOAD_DIR = os.path.abspath(os.environ.get("AUDIT_UPLOAD_DIR", "uploads"))
+MAX_UPLOAD_BYTES = int(os.environ.get("AUDIT_MAX_UPLOAD_BYTES", str(100 * 1024 * 1024)))
+PDF_EXTENSIONS = {".pdf"}
+CLIENT_LIST_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 
 def _set_parse_progress(progress_id: Optional[str], percent: int, message: str, stage: str = "processing", **extra):
     if not progress_id:
@@ -103,20 +106,34 @@ async def parse_files(
                 password = None  # use per-file passwords
         except (json.JSONDecodeError, TypeError):
             pass  # single password fallback
-    upload_dir = os.path.abspath("uploads")
-    os.makedirs(upload_dir, exist_ok=True)
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
     
-    def safe_save(upload_file: UploadFile) -> str:
+    def safe_save(upload_file: UploadFile, allowed_extensions: set[str]) -> str:
         safe_name = Path(upload_file.filename or "file").name
-        ext = Path(safe_name).suffix
+        ext = Path(safe_name).suffix.lower()
+        if ext not in allowed_extensions:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext or 'unknown'}")
         unique_name = f"{uuid.uuid4().hex}{ext}"
-        dest = os.path.join(upload_dir, unique_name)
+        dest = os.path.join(UPLOAD_DIR, unique_name)
+        written = 0
         with open(dest, "wb") as f:
-            shutil.copyfileobj(upload_file.file, f)
+            while True:
+                chunk = upload_file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    f.close()
+                    try:
+                        os.remove(dest)
+                    except OSError:
+                        pass
+                    raise HTTPException(status_code=413, detail=f"File too large: {safe_name}")
+                f.write(chunk)
         return os.path.abspath(dest)
     
     # Save client list
-    client_list_path = safe_save(client_list)
+    client_list_path = safe_save(client_list, CLIENT_LIST_EXTENSIONS)
     _set_parse_progress(progress_id, 5, "Reading client list...", "client_list")
     
     # Parse client list (CSV or Excel)
@@ -165,7 +182,7 @@ async def parse_files(
     
     for pdf_file in pdf:
         file_index = len(pdf_paths) + 1
-        pdf_path = safe_save(pdf_file)
+        pdf_path = safe_save(pdf_file, PDF_EXTENSIONS)
         _set_parse_progress(
             progress_id,
             12 + int((file_index - 1) / max(len(pdf), 1) * 48),
@@ -314,9 +331,9 @@ def mark_transaction_exported(
     db: Session = Depends(get_db)
 ):
     """Mark a transaction as exported"""
-    from datetime import datetime
+    from backend.models import utc_now
     service = SessionService(db)
-    tx = service.update_transaction(transaction_id, exported_at=datetime.utcnow())
+    tx = service.update_transaction(transaction_id, exported_at=utc_now())
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return {"success": True, "exported_at": tx.exported_at}

@@ -53,6 +53,8 @@ source backend/venv/bin/activate
 pip install -r backend/requirements.txt
 ```
 
+`bun run build:python` also supports a root `.venv` or an explicit `PYTHON=/path/to/python` override.
+
 **Windows setup:**
 ```cmd
 bun install

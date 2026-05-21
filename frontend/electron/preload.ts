@@ -21,8 +21,9 @@ export interface AppUpdateStatus {
 
 export interface ElectronAPI {
   getBackendPort: () => Promise<number>
+  getBackendConfig: () => Promise<{ port: number; token: string }>
   selectFile: (options: { filters?: { name: string; extensions: string[] }[]; properties?: ('openFile' | 'multiSelections')[] }) => Promise<{ canceled: boolean; filePaths: string[] }>
-  showSaveDialog: (options: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) => Promise<{ canceled: boolean; filePath?: string }>
+  showSaveDialog: (options: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) => Promise<{ canceled: boolean; filePath?: string; exportPathToken?: string }>
   getAppVersion: () => Promise<string>
   checkForUpdates: () => Promise<AppUpdateStatus>
   installUpdate: () => Promise<{ success: boolean; error?: string }>
@@ -33,6 +34,7 @@ export interface ElectronAPI {
 
 const api: ElectronAPI = {
   getBackendPort: () => ipcRenderer.invoke('get-backend-port'),
+  getBackendConfig: () => ipcRenderer.invoke('get-backend-config'),
   selectFile: (options) => ipcRenderer.invoke('select-file', options),
   showSaveDialog: (options) => ipcRenderer.invoke('show-save-dialog', options),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
