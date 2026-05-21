@@ -41,6 +41,7 @@ export function AppShell() {
     setShowNewAudit, goHome, setSearchQuery,
     setResultFilter, setAdvancedFilter,
     toggleFiltersExpanded, setReviewView, activeFilterCount,
+    pushToast,
   } = useUIStore()
 
   const settings = useSettingsStore((s) => s.settings)
@@ -66,6 +67,17 @@ export function AppShell() {
 
   // Load sessions on mount
   useEffect(() => { loadSessions() }, [loadSessions])
+
+  useEffect(() => {
+    if (!window.electronAPI?.onBackendCrashed) return undefined
+    return window.electronAPI.onBackendCrashed(({ code, signal }) => {
+      const reason = signal || (code !== null ? `exit code ${code}` : 'unknown reason')
+      pushToast({
+        message: `Backend stopped (${reason}). Save your work and restart the app.`,
+        action: { label: 'Reload', onClick: () => window.location.reload() },
+      })
+    })
+  }, [pushToast])
 
   // Active view
   const [activeView, setActiveView] = useState<'data' | 'review'>('data')

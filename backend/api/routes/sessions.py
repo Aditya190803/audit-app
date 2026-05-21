@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from backend.database import get_db
@@ -18,9 +18,13 @@ def create_session(data: AuditSessionCreate, db: Session = Depends(get_db)):
     )
 
 @router.get("/", response_model=List[AuditSessionResponse])
-def list_sessions(db: Session = Depends(get_db)):
+def list_sessions(
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
     service = SessionService(db)
-    return service.get_all_sessions()
+    return service.get_all_sessions(limit=limit, offset=offset)
 
 @router.get("/recovery")
 def get_recovery_session(db: Session = Depends(get_db)):

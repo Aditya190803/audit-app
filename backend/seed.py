@@ -50,11 +50,6 @@ def seed_database():
                 category = "brokers" if key in ["broker_list", "broker_exclusions"] else "rules" if key in ["suspicious_threshold", "recurring_days_window", "suspicious_keywords"] else "matching" if key in ["fuzzy_match_threshold", "min_confidence_for_auto_tag", "name_normalization_rules"] else "general"
                 db.add(Config(key=key, value=value, category=category))
 
-        # Force-update suspicious_keywords on existing databases
-        config = db.query(Config).filter(Config.key == "suspicious_keywords").first()
-        if config:
-            config.value = DEFAULT_CONFIGS["suspicious_keywords"]
-
         db.commit()
         print("Database seeded successfully.")
     except Exception as e:

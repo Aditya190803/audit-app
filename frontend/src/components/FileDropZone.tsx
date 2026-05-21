@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import { useDropzone } from 'react-dropzone'
+import { useDropzone, type DropzoneState } from 'react-dropzone'
 import { FileText, FileSpreadsheet, Lock, X, ArrowRight, ChevronDown, Search, Check, Building2 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { getParsers } from '../lib/api'
@@ -71,6 +71,100 @@ function bestNameColumnMatch(headers: string[]): string | null {
     if (includes >= 0) return headers[includes]
   }
   return headers[0] ?? null
+}
+
+function FileDropContainer({
+  dropzone,
+  label,
+  activeLabel,
+  selectedLabel,
+  helpText,
+}: {
+  dropzone: DropzoneState
+  label: string
+  activeLabel: string
+  selectedLabel?: string
+  helpText: string
+}) {
+  return (
+    <div
+      {...dropzone.getRootProps()}
+      className={`border-2 border-dashed rounded-[var(--radius-lg)] p-8 text-center cursor-pointer transition-colors duration-150 ${
+        dropzone.isDragActive
+          ? 'border-[var(--primary)]'
+          : 'border-[var(--border-strong)] hover:border-[var(--primary)]'
+      }`}
+    >
+      <input {...dropzone.getInputProps()} />
+      <p className="text-sm font-medium text-[var(--text-primary)]">
+        {dropzone.isDragActive ? activeLabel : selectedLabel || label}
+      </p>
+      <p className="text-xs text-[var(--text-tertiary)] mt-1">{helpText}</p>
+    </div>
+  )
+}
+
+function ParseProgressIndicator({
+  progressPercent,
+  message,
+  stage,
+  etaText,
+  currentFile,
+  totalFiles,
+  currentPage,
+  totalPages,
+}: {
+  progressPercent: number
+  message?: string
+  stage?: string
+  etaText: string
+  currentFile?: number
+  totalFiles?: number
+  currentPage?: number
+  totalPages?: number
+}) {
+  return (
+    <div className="border border-[var(--border)] rounded-[var(--radius-lg)] bg-[var(--surface)] p-4 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-[var(--text-primary)]">Audit in progress</p>
+          <p className="text-xs text-[var(--text-tertiary)] truncate">
+            {message || 'Starting audit...'}
+          </p>
+        </div>
+        <span className="text-sm font-mono font-medium text-[var(--primary)] tabular-nums">
+          {progressPercent}%
+        </span>
+      </div>
+
+      <div
+        className="h-2 overflow-hidden rounded-full bg-[var(--surface-hover)]"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progressPercent}
+        aria-label="Audit progress"
+      >
+        <div
+          className="h-full rounded-full bg-[var(--primary)] transition-[width] duration-300 ease-out"
+          style={{ width: `${progressPercent}%` }}
+        />
+      </div>
+
+      <div className="flex items-center justify-between text-[11px] text-[var(--text-tertiary)]">
+        <span className="capitalize">{(stage || 'queued').replace(/_/g, ' ')}</span>
+        <span className="flex items-center gap-2">
+          {etaText && <span>{etaText}</span>}
+          {totalFiles && (
+            <span>
+              PDF {currentFile || 1} of {totalFiles}
+              {totalPages ? ` · Page ${currentPage || 1} of ${totalPages}` : ''}
+            </span>
+          )}
+        </span>
+      </div>
+    </div>
+  )
 }
 
 export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isProcessing: isProcessingProp, processingProgress: processingProgressProp, brokers = [] }) => {
@@ -422,35 +516,20 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
     <div className="space-y-8">
       {/* Drop zones */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div
-          {...pdfDropzone.getRootProps()}
-          className={`border-2 border-dashed rounded-[var(--radius-lg)] p-8 text-center cursor-pointer transition-colors duration-150 ${
-            pdfDropzone.isDragActive
-              ? 'border-[var(--primary)]'
-              : 'border-[var(--border-strong)] hover:border-[var(--primary)]'
-          }`}
-        >
-          <input {...pdfDropzone.getInputProps()} />
-          <p className="text-sm font-medium text-[var(--text-primary)]">
-            {pdfDropzone.isDragActive ? 'Drop PDFs here' : pdfFiles.length > 0 ? `${pdfFiles.length} PDF${pdfFiles.length > 1 ? 's' : ''} selected` : 'Bank Statement'}
-          </p>
-          <p className="text-xs text-[var(--text-tertiary)] mt-1">PDF only (multiple allowed)</p>
-        </div>
+        <FileDropContainer
+          dropzone={pdfDropzone}
+          label="Bank Statement"
+          activeLabel="Drop PDFs here"
+          selectedLabel={pdfFiles.length > 0 ? `${pdfFiles.length} PDF${pdfFiles.length > 1 ? 's' : ''} selected` : undefined}
+          helpText="PDF only (multiple allowed)"
+        />
 
-        <div
-          {...clientListDropzone.getRootProps()}
-          className={`border-2 border-dashed rounded-[var(--radius-lg)] p-8 text-center cursor-pointer transition-colors duration-150 ${
-            clientListDropzone.isDragActive
-              ? 'border-[var(--primary)]'
-              : 'border-[var(--border-strong)] hover:border-[var(--primary)]'
-          }`}
-        >
-          <input {...clientListDropzone.getInputProps()} />
-          <p className="text-sm font-medium text-[var(--text-primary)]">
-            {clientListDropzone.isDragActive ? 'Drop file here' : 'Client List'}
-          </p>
-          <p className="text-xs text-[var(--text-tertiary)] mt-1">CSV or Excel</p>
-        </div>
+        <FileDropContainer
+          dropzone={clientListDropzone}
+          label="Client List"
+          activeLabel="Drop file here"
+          helpText="CSV or Excel"
+        />
       </div>
 
       {/* Invalid PDF warning */}
@@ -889,46 +968,16 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
 
       {/* Start Audit */}
       {isProcessing && (
-        <div className="border border-[var(--border)] rounded-[var(--radius-lg)] bg-[var(--surface)] p-4 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-[var(--text-primary)]">Audit in progress</p>
-              <p className="text-xs text-[var(--text-tertiary)] truncate">
-                {processingProgress?.message || 'Starting audit...'}
-              </p>
-            </div>
-            <span className="text-sm font-mono font-medium text-[var(--primary)] tabular-nums">
-              {progressPercent}%
-            </span>
-          </div>
-
-          <div
-            className="h-2 overflow-hidden rounded-full bg-[var(--surface-hover)]"
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={progressPercent}
-            aria-label="Audit progress"
-          >
-            <div
-              className="h-full rounded-full bg-[var(--primary)] transition-[width] duration-300 ease-out"
-              style={{ width: `${progressPercent}%` }}
-            />
-          </div>
-
-          <div className="flex items-center justify-between text-[11px] text-[var(--text-tertiary)]">
-            <span className="capitalize">{(processingProgress?.stage || 'queued').replace(/_/g, ' ')}</span>
-            <span className="flex items-center gap-2">
-              {etaText && <span>{etaText}</span>}
-              {processingProgress?.total_files && (
-                <span>
-                  PDF {processingProgress.current_file || 1} of {processingProgress.total_files}
-                  {processingProgress.total_pages ? ` · Page ${processingProgress.current_page || 1} of ${processingProgress.total_pages}` : ''}
-                </span>
-              )}
-            </span>
-          </div>
-        </div>
+        <ParseProgressIndicator
+          progressPercent={progressPercent}
+          message={processingProgress?.message}
+          stage={processingProgress?.stage}
+          etaText={etaText}
+          currentFile={processingProgress?.current_file}
+          totalFiles={processingProgress?.total_files}
+          currentPage={processingProgress?.current_page}
+          totalPages={processingProgress?.total_pages}
+        />
       )}
 
       <button

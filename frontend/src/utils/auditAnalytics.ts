@@ -413,13 +413,13 @@ function sameDayKeys(transactions: Transaction[]): Set<string> {
   return new Set(Array.from(counts.entries()).filter(([, count]) => count > 1).map(([key]) => key))
 }
 
-function sameAmountKeys(transactions: Transaction[]): Set<number> {
+function sameAmountCounts(transactions: Transaction[]): Map<number, number> {
   const counts = new Map<number, number>()
   for (const tx of transactions) {
-    const amt = tx.amount ?? 0
+    const amt = Math.abs(tx.amount ?? 0)
     counts.set(amt, (counts.get(amt) ?? 0) + 1)
   }
-  return new Set(Array.from(counts.entries()).filter(([, count]) => count > 1).map(([key]) => key))
+  return counts
 }
 
 function manySmallTxKeys(transactions: Transaction[], threshold: number): Set<string> {
@@ -439,7 +439,7 @@ function manySmallTxKeys(transactions: Transaction[], threshold: number): Set<st
   )
 }
 
-function clientsWithBothActivity(transactions: Transaction[]): Set<string> {
+function activityKeys(transactions: Transaction[]): { debit: Set<string>; credit: Set<string>; both: Set<string> } {
   const debit = new Set<string>()
   const credit = new Set<string>()
   for (const tx of transactions) {
@@ -448,7 +448,7 @@ function clientsWithBothActivity(transactions: Transaction[]): Set<string> {
     if (amt < 0) debit.add(key)
     if (amt > 0) credit.add(key)
   }
-  return new Set([...debit].filter((k) => credit.has(k)))
+  return { debit, credit, both: new Set([...debit].filter((k) => credit.has(k))) }
 }
 
 function buildMonthlyBreakdown(txns: Transaction[]): MonthlyBreakdown[] {
@@ -488,8 +488,8 @@ export function buildAuditAnalytics(
 ): AuditAnalytics {
   const repeatParties = repeatKeys(transactions, (tx) => partyDisplayName(tx))
   const sameDayParties = sameDayKeys(transactions)
-  const sameAmounts = sameAmountKeys(transactions)
-  const bothActivity = clientsWithBothActivity(transactions)
+  const sameAmounts = sameAmountCounts(transactions)
+  const activity = activityKeys(transactions)
   const minAbs = filters.minAmountAbs ? Number(filters.minAmountAbs) : null
   const maxAbs = filters.maxAmountAbs ? Number(filters.maxAmountAbs) : null
   const pageFrom = filters.pageFrom ? Number(filters.pageFrom) : null
@@ -537,7 +537,7 @@ export function buildAuditAnalytics(
     if (filters.weekend && !isWeekend(tx.date)) return false
 
     if (sameAmountCount !== null) {
-      const count = tx.amount !== null ? Array.from(sameAmounts).filter((a) => Math.abs(a) === Math.abs(tx.amount!)).length : 0
+      const count = tx.amount !== null ? sameAmounts.get(Math.abs(tx.amount)) ?? 0 : 0
       if (count < sameAmountCount) return false
     }
 
@@ -550,18 +550,16 @@ export function buildAuditAnalytics(
     if (filters.tagConfidence === 'low' && !isLowConfidence(tx)) return false
     if (filters.tagConfidence === 'high' && !isHighConfidence(tx)) return false
 
-    if (filters.clientActivityType === 'both' && !bothActivity.has(partyKey)) return false
-    if (filters.clientActivityType === 'debit_only' && creditHas(transactions, partyKey)) return false
-    if (filters.clientActivityType === 'credit_only' && debitHas(transactions, partyKey)) return false
+    if (filters.clientActivityType === 'both' && !activity.both.has(partyKey)) return false
+    if (filters.clientActivityType === 'debit_only' && activity.credit.has(partyKey)) return false
+    if (filters.clientActivityType === 'credit_only' && activity.debit.has(partyKey)) return false
 
     if (filters.showRepeatClients && !repeatParties.has(partyKey)) return false
     if (filters.showSuspiciousClients && !tx.tags.some((t) => t.tag_type === 'suspicious')) return false
 
     if (filters.manySmallTx && !manySmallTxSet.has(partyKey)) return false
 
-    if (filters.reviewStatus === 'reviewed' && !tx.review_status) {
-      if (filters.reviewStatus === 'reviewed' && !tx.review_status) return false
-    }
+    if (filters.reviewStatus === 'reviewed' && tx.review_status !== 'reviewed') return false
     if (filters.reviewStatus === 'unreviewed' && tx.review_status === 'reviewed') return false
     if (filters.reviewStatus === 'needs_review' && tx.review_status !== 'needs_review') return false
     if (filters.reviewStatus === 'flagged' && tx.review_status !== 'flagged') return false
@@ -609,30 +607,57 @@ export function buildAuditAnalytics(
     clientGroups = clientGroups.filter((g) => g.debit >= min || g.credit >= min)
   }
 
-  const totals = filteredTransactions.reduce(
-    (acc, tx) => {
-      const amount = tx.amount ?? 0
-      acc.count += 1
-      if (amount < 0) acc.debit += Math.abs(amount)
-      if (amount > 0) acc.credit += amount
-      acc.net += amount
-      if (tx.tags.length > 0) acc.tagged += 1
-      else acc.untagged += 1
-      return acc
-    },
-    { count: 0, debit: 0, credit: 0, net: 0, tagged: 0, untagged: 0 }
-  )
-
+  const totals = { count: 0, debit: 0, credit: 0, net: 0, tagged: 0, untagged: 0 }
   const exceptions = {
-    untagged: filteredTransactions.filter((tx) => tx.tags.length === 0).length,
-    repeat: filteredTransactions.filter((tx) => repeatParties.has(groupKey(partyDisplayName(tx)))).length,
-    highValue: filteredTransactions.filter((tx) => amountAbs(tx) >= suspiciousThreshold).length,
-    lowConfidence: filteredTransactions.filter(isLowConfidence).length,
-    missingParty: filteredTransactions.filter((tx) => !normalize(tx.party_name)).length,
-    cash: filteredTransactions.filter(isCash).length,
-    sameDay: filteredTransactions.filter((tx) => sameDayParties.has(`${groupKey(tx.party_name)}:${tx.date || 'unknown'}`)).length,
-    weekend: filteredTransactions.filter((tx) => isWeekend(tx.date)).length,
-    roundAmount: filteredTransactions.filter((tx) => isRoundAmount(tx.amount ?? 0)).length,
+    untagged: 0,
+    repeat: 0,
+    highValue: 0,
+    lowConfidence: 0,
+    missingParty: 0,
+    cash: 0,
+    sameDay: 0,
+    weekend: 0,
+    roundAmount: 0,
+  }
+  const tagDistribution = { client: 0, broker: 0, suspicious: 0, untagged: 0 }
+  const suspiciousBuckets: Record<SuspiciousSubcategory, Transaction[]> = {
+    recurring: [],
+    high_value: [],
+    other: [],
+  }
+
+  for (const tx of filteredTransactions) {
+    const amount = tx.amount ?? 0
+    const partyKey = groupKey(partyDisplayName(tx))
+    const tags = tx.tags
+    const hasClient = tags.some((t) => t.tag_type === 'client')
+    const hasBroker = tags.some((t) => t.tag_type === 'broker')
+    const hasSuspicious = tags.some((t) => t.tag_type === 'suspicious')
+
+    totals.count += 1
+    if (amount < 0) totals.debit += Math.abs(amount)
+    if (amount > 0) totals.credit += amount
+    totals.net += amount
+    if (tags.length > 0) totals.tagged += 1
+    else totals.untagged += 1
+
+    if (tags.length === 0) exceptions.untagged += 1
+    if (repeatParties.has(partyKey)) exceptions.repeat += 1
+    if (amountAbs(tx) >= suspiciousThreshold) exceptions.highValue += 1
+    if (isLowConfidence(tx)) exceptions.lowConfidence += 1
+    if (!normalize(tx.party_name)) exceptions.missingParty += 1
+    if (isCash(tx)) exceptions.cash += 1
+    if (sameDayParties.has(`${groupKey(tx.party_name)}:${tx.date || 'unknown'}`)) exceptions.sameDay += 1
+    if (isWeekend(tx.date)) exceptions.weekend += 1
+    if (isRoundAmount(amount)) exceptions.roundAmount += 1
+
+    if (hasClient) tagDistribution.client += 1
+    if (hasBroker) tagDistribution.broker += 1
+    if (hasSuspicious) {
+      tagDistribution.suspicious += 1
+      suspiciousBuckets[getSuspiciousSubcategory(tx, suspiciousThreshold)].push(tx)
+    }
+    if (tags.length === 0) tagDistribution.untagged += 1
   }
 
   const monthlyBreakdown = buildMonthlyBreakdown(filteredTransactions)
@@ -646,27 +671,10 @@ export function buildAuditAnalytics(
     .slice(0, 10)
     .map((g) => ({ name: g.name, debit: g.debit, credit: g.credit, count: g.count }))
 
-  const tagDistribution = {
-    client: filteredTransactions.filter((tx) => tx.tags.some((t) => t.tag_type === 'client')).length,
-    broker: filteredTransactions.filter((tx) => tx.tags.some((t) => t.tag_type === 'broker')).length,
-    suspicious: filteredTransactions.filter((tx) => tx.tags.some((t) => t.tag_type === 'suspicious')).length,
-    untagged: filteredTransactions.filter((tx) => tx.tags.length === 0).length,
-  }
-
-  const suspiciousTransactions = filteredTransactions.filter((tx) => tx.tags.some((t) => t.tag_type === 'suspicious'))
   const suspiciousSubcategories = {
-    recurring: grouped(
-      suspiciousTransactions.filter((tx) => getSuspiciousSubcategory(tx, suspiciousThreshold) === 'recurring'),
-      suspiciousDisplayName
-    ),
-    highValue: grouped(
-      suspiciousTransactions.filter((tx) => getSuspiciousSubcategory(tx, suspiciousThreshold) === 'high_value'),
-      suspiciousDisplayName
-    ),
-    other: grouped(
-      suspiciousTransactions.filter((tx) => getSuspiciousSubcategory(tx, suspiciousThreshold) === 'other'),
-      suspiciousDisplayName
-    ),
+    recurring: grouped(suspiciousBuckets.recurring, suspiciousDisplayName),
+    highValue: grouped(suspiciousBuckets.high_value, suspiciousDisplayName),
+    other: grouped(suspiciousBuckets.other, suspiciousDisplayName),
   }
 
   return {
@@ -683,12 +691,4 @@ export function buildAuditAnalytics(
     tagDistribution,
     suspiciousSubcategories,
   }
-}
-
-function creditHas(txns: Transaction[], key: string): boolean {
-  return txns.some((tx) => groupKey(tx.party_name) === key && (tx.amount ?? 0) > 0)
-}
-
-function debitHas(txns: Transaction[], key: string): boolean {
-  return txns.some((tx) => groupKey(tx.party_name) === key && (tx.amount ?? 0) < 0)
 }

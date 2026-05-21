@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from sqlalchemy import engine_from_config, pool
 from alembic import context
-from backend.database import Base, DATABASE_URL
+from backend.database import Base, SYNC_DATABASE_URL as DATABASE_URL
 from backend.models import AuditSession, Transaction, Tag, Broker, Alias, AuditLog, Config, BankProfile, UndoRedoState
 
 config = context.config

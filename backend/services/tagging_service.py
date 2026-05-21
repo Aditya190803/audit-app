@@ -7,6 +7,8 @@ from typing import List, Dict, Any, Optional, Callable
 from collections import defaultdict
 import re
 from datetime import datetime
+import concurrent.futures
+from backend.services.process_pool import get_process_pool, process_pool_worker_count
 
 class TaggingService:
     def __init__(self, db: Session):
@@ -163,12 +165,10 @@ class TaggingService:
             for t in transactions
         ]
         
-        import concurrent.futures
-        import os
         from backend.services.tagging_worker import _process_transaction_batch
         
-        # Split transactions into chunks for workers (cap at 3-4 cores)
-        max_workers = min(2, max(1, os.cpu_count() if os.cpu_count() else 2))
+        # Split transactions into chunks for the shared backend process pool.
+        max_workers = process_pool_worker_count()
         chunk_size = max(1, len(tx_dicts) // max_workers)
         batches = [tx_dicts[i:i + chunk_size] for i in range(0, len(tx_dicts), chunk_size)]
         
@@ -177,27 +177,27 @@ class TaggingService:
         total_transactions = len(transactions)
         
         worker_errors = []
-        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-            batch_sizes = {i: len(b) for i, b in enumerate(batches)}
-            futures = {
-                executor.submit(
-                    _process_transaction_batch, 
-                    batch, clients, phone_map, broker_names, alias_list, alias_to_canonical,
-                    suspicious_threshold, fuzzy_threshold, exclusions, common_words, recurring_map, suspicious_keywords
-                ): i for i, batch in enumerate(batches)
-            }
-            
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    batch_idx = futures[future]
-                    result = future.result()
-                    all_tags_data.extend(result)
-                    completed += batch_sizes[batch_idx]
-                    if progress_callback:
-                        progress_callback(min(completed, total_transactions), total_transactions)
-                except Exception as e:
-                    worker_errors.append(e)
-                    print(f"[TaggingService] Worker failed: {e}")
+        executor = get_process_pool()
+        batch_sizes = {i: len(b) for i, b in enumerate(batches)}
+        futures = {
+            executor.submit(
+                _process_transaction_batch,
+                batch, clients, phone_map, broker_names, alias_list, alias_to_canonical,
+                suspicious_threshold, fuzzy_threshold, exclusions, common_words, recurring_map, suspicious_keywords
+            ): i for i, batch in enumerate(batches)
+        }
+
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                batch_idx = futures[future]
+                result = future.result()
+                all_tags_data.extend(result)
+                completed += batch_sizes[batch_idx]
+                if progress_callback:
+                    progress_callback(min(completed, total_transactions), total_transactions)
+            except Exception as e:
+                worker_errors.append(e)
+                print(f"[TaggingService] Worker failed: {e}")
 
         if worker_errors:
             self.db.rollback()

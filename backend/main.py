@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from backend.database import engine, Base
 from backend.security import LocalTokenAuthMiddleware
 from backend.seed import seed_database
+from backend.services.process_pool import shutdown_process_pool
 from backend.api.routes import sessions, transactions, tags, brokers, export, settings, audit
 
 @asynccontextmanager
@@ -22,6 +23,7 @@ async def lifespan(app: FastAPI):
     print("[Backend] Database initialized and seeded.")
     yield
     # Shutdown
+    shutdown_process_pool()
     print("[Backend] Shutting down...")
 
 app = FastAPI(
@@ -45,7 +47,6 @@ def _allowed_origins():
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "file://",
-        "null",
     ]
 
 # CORS - keep dev origins narrow; token auth protects the API boundary.

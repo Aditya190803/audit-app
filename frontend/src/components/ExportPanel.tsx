@@ -1,8 +1,9 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { X, Download, FileSpreadsheet } from 'lucide-react'
 import type { ExportFormat } from '../types/api'
 import { exportFile } from '../lib/api'
 import { useUIStore } from '../stores/uiStore'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 
 interface ExportPanelProps {
   isOpen: boolean
@@ -19,6 +20,8 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessi
   const [selectedFormat, setSelectedFormat] = useState<ExportFormat>('excel')
   const [isExporting, setIsExporting] = useState(false)
   const pushToast = useUIStore((s) => s.pushToast)
+  const panelRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(panelRef, isOpen, onClose)
 
   if (!isOpen) return null
 
@@ -50,9 +53,16 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessi
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] w-full max-w-md">
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="export-title"
+        className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] w-full max-w-md"
+      >
         <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)]">
-          <h2 className="text-sm font-semibold text-[var(--text-primary)]">Export Results</h2>
+          <h2 id="export-title" className="text-sm font-semibold text-[var(--text-primary)]">Export Results</h2>
           <button
             onClick={onClose}
             className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] rounded-[var(--radius-sm)] transition-colors duration-150"

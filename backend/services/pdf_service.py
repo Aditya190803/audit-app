@@ -1,3 +1,4 @@
+import concurrent.futures
 import fitz  # PyMuPDF
 import pdfplumber
 import os
@@ -5,6 +6,7 @@ from typing import List, Dict, Any, Optional, Callable
 import pytesseract
 from PIL import Image
 import io
+from backend.services.process_pool import get_process_pool
 
 class PDFService:
     def __init__(self, tesseract_path: Optional[str] = None):
@@ -14,7 +16,6 @@ class PDFService:
     def extract_text(self, pdf_path: str, password: Optional[str] = None,
                      progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Dict[str, Any]]:
         """Extract text and metadata from all pages in parallel."""
-        import concurrent.futures
         from backend.services.pdf_worker import _process_page_text
         
         doc = fitz.open(pdf_path)
@@ -28,17 +29,15 @@ class PDFService:
         pages = []
         tesseract_cmd = getattr(pytesseract.pytesseract, 'tesseract_cmd', None)
         
-        max_workers = min(2, max(1, os.cpu_count() or 2))
-        
-        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(_process_page_text, pdf_path, password, i, tesseract_cmd): i for i in range(num_pages)}
-            for i, future in enumerate(concurrent.futures.as_completed(futures)):
-                try:
-                    pages.append(future.result())
-                except Exception as e:
-                    print(f"[PDFService] Error processing page text: {e}")
-                if progress_callback:
-                    progress_callback(i + 1, num_pages)
+        executor = get_process_pool()
+        futures = {executor.submit(_process_page_text, pdf_path, password, i, tesseract_cmd): i for i in range(num_pages)}
+        for i, future in enumerate(concurrent.futures.as_completed(futures)):
+            try:
+                pages.append(future.result())
+            except Exception as e:
+                print(f"[PDFService] Error processing page text: {e}")
+            if progress_callback:
+                progress_callback(i + 1, num_pages)
         
         pages.sort(key=lambda x: x["page_number"])
         return pages
@@ -46,7 +45,6 @@ class PDFService:
     def extract_tables(self, pdf_path: str, password: Optional[str] = None,
                        progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Dict[str, Any]]:
         """Extract tables from PDF using pdfplumber in parallel."""
-        import concurrent.futures
         from backend.services.pdf_worker import _process_page_tables
         
         doc = fitz.open(pdf_path)
@@ -58,17 +56,15 @@ class PDFService:
         doc.close()
 
         tables = []
-        max_workers = min(2, max(1, os.cpu_count() or 2))
-        
-        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(_process_page_tables, pdf_path, password, i): i for i in range(num_pages)}
-            for i, future in enumerate(concurrent.futures.as_completed(futures)):
-                try:
-                    tables.extend(future.result())
-                except Exception as e:
-                    print(f"[PDFService] Error processing page tables: {e}")
-                if progress_callback:
-                    progress_callback(i + 1, num_pages)
+        executor = get_process_pool()
+        futures = {executor.submit(_process_page_tables, pdf_path, password, i): i for i in range(num_pages)}
+        for i, future in enumerate(concurrent.futures.as_completed(futures)):
+            try:
+                tables.extend(future.result())
+            except Exception as e:
+                print(f"[PDFService] Error processing page tables: {e}")
+            if progress_callback:
+                progress_callback(i + 1, num_pages)
         
         tables.sort(key=lambda x: x["page_number"])
         return tables

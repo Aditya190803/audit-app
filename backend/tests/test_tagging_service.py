@@ -94,7 +94,7 @@ class TaggingServiceTests(unittest.TestCase):
             def submit(self, *args, **kwargs):
                 return FailingFuture()
 
-        with patch("concurrent.futures.ProcessPoolExecutor", FailingExecutor):
+        with patch("backend.services.tagging_service.get_process_pool", lambda: FailingExecutor()):
             with patch("concurrent.futures.as_completed", lambda futures: list(futures)):
                 with self.assertRaises(RuntimeError):
                     TaggingService(self.db).auto_tag_session(

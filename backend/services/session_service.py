@@ -37,8 +37,14 @@ class SessionService:
     def get_session(self, session_id: int) -> Optional[AuditSession]:
         return self.db.query(AuditSession).filter(AuditSession.id == session_id).first()
     
-    def get_all_sessions(self) -> List[AuditSession]:
-        return self.db.query(AuditSession).order_by(AuditSession.created_at.desc()).all()
+    def get_all_sessions(self, limit: int = 100, offset: int = 0) -> List[AuditSession]:
+        return (
+            self.db.query(AuditSession)
+            .order_by(AuditSession.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
     
     def update_session(self, session_id: int, **kwargs) -> Optional[AuditSession]:
         session = self.get_session(session_id)
@@ -82,8 +88,18 @@ class SessionService:
         
         return transactions
     
-    def get_transactions(self, session_id: int) -> List[Transaction]:
-        return self.db.query(Transaction).filter(Transaction.session_id == session_id).all()
+    def get_transactions(
+        self,
+        session_id: int,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> List[Transaction]:
+        query = self.db.query(Transaction).filter(Transaction.session_id == session_id)
+        if offset:
+            query = query.offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
     
     def get_transaction(self, transaction_id: int) -> Optional[Transaction]:
         return self.db.query(Transaction).filter(Transaction.id == transaction_id).first()

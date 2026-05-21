@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, JSON, Numeric
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from backend.database import Base
@@ -25,9 +25,9 @@ class Transaction(Base):
     __tablename__ = "transactions"
     
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("audit_sessions.id"), nullable=False)
+    session_id = Column(Integer, ForeignKey("audit_sessions.id"), nullable=False, index=True)
     date = Column(String, nullable=True)
-    amount = Column(Float, nullable=True)
+    amount = Column(Numeric(precision=15, scale=2), nullable=True)
     description = Column(Text, nullable=True)
     party_name = Column(String, nullable=True)
     raw_text = Column(Text, nullable=True)
@@ -47,7 +47,7 @@ class Tag(Base):
     __tablename__ = "tags"
     
     id = Column(Integer, primary_key=True, index=True)
-    transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=False)
+    transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=False, index=True)
     tag_type = Column(String, nullable=False)  # client, broker, suspicious
     confidence = Column(Float, default=1.0)
     reason = Column(Text, nullable=True)
@@ -78,7 +78,7 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
     
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("audit_sessions.id"), nullable=True)
+    session_id = Column(Integer, ForeignKey("audit_sessions.id"), nullable=True, index=True)
     action = Column(String, nullable=False)
     entity_type = Column(String, nullable=False)
     entity_id = Column(Integer, nullable=True)
@@ -109,7 +109,7 @@ class UndoRedoState(Base):
     __tablename__ = "undo_redo_states"
     
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("audit_sessions.id"), nullable=False)
+    session_id = Column(Integer, ForeignKey("audit_sessions.id"), nullable=False, index=True)
     action_type = Column(String, nullable=False)
     state_data = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=utc_now)

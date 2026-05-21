@@ -19,6 +19,11 @@ export interface AppUpdateStatus {
   percent?: number
 }
 
+export interface BackendCrashEvent {
+  code: number | null
+  signal: string | null
+}
+
 export interface ElectronAPI {
   getBackendPort: () => Promise<number>
   getBackendConfig: () => Promise<{ port: number; token: string }>
@@ -28,6 +33,7 @@ export interface ElectronAPI {
   checkForUpdates: () => Promise<AppUpdateStatus>
   installUpdate: () => Promise<{ success: boolean; error?: string }>
   onUpdateStatus: (callback: (status: AppUpdateStatus) => void) => () => void
+  onBackendCrashed: (callback: (event: BackendCrashEvent) => void) => () => void
   readExampleFiles: () => Promise<{ folders: Record<string, string[]>; clientList: string | null }>
   readFileBase64: (filePath: string) => Promise<{ name: string; data: string; path: string } | null>
 }
@@ -44,6 +50,11 @@ const api: ElectronAPI = {
     const handler = (_event: IpcRendererEvent, status: AppUpdateStatus) => callback(status)
     ipcRenderer.on('update-status', handler)
     return () => ipcRenderer.removeListener('update-status', handler)
+  },
+  onBackendCrashed: (callback) => {
+    const handler = (_event: IpcRendererEvent, payload: BackendCrashEvent) => callback(payload)
+    ipcRenderer.on('backend-crashed', handler)
+    return () => ipcRenderer.removeListener('backend-crashed', handler)
   },
   readExampleFiles: () => ipcRenderer.invoke('read-example-files'),
   readFileBase64: (filePath) => ipcRenderer.invoke('read-file-base64', filePath)

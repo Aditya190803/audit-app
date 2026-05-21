@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, session } from 'electron'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -10,6 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const APP_ROOT = findProjectRoot(__dirname)
 
 let pythonProcess: ReturnType<typeof spawn> | null = null
+let mainWindow: BrowserWindow | null = null
 let backendPort: number = 0
 let backendToken = crypto.randomBytes(32).toString('hex')
 let exportPathSecret = crypto.randomBytes(32).toString('hex')
@@ -44,6 +45,11 @@ type GitHubUpdateConfig = {
   privateRepo: boolean
 }
 
+type BackendCrashPayload = {
+  code: number | null
+  signal: NodeJS.Signals | null
+}
+
 process.env.APP_ROOT = APP_ROOT
 
 autoUpdater.autoDownload = true
@@ -55,6 +61,37 @@ function publishUpdateStatus(next: UpdateStatus): UpdateStatus {
     win.webContents.send('update-status', updateStatus)
   }
   return updateStatus
+}
+
+function publishBackendCrash(payload: BackendCrashPayload): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send('backend-crashed', payload)
+    }
+  }
+}
+
+function installContentSecurityPolicy(): void {
+  const policy = [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self' data:",
+    "img-src 'self' data: blob:",
+    "connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:*",
+    "worker-src 'self' blob:"
+  ].join('; ')
+
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [policy]
+      }
+    })
+  })
 }
 
 function normalizeUpdateInfo(status: UpdateStatusName, message: string, info?: UpdateInfo): UpdateStatus {
@@ -250,7 +287,7 @@ async function startPythonBackend(port: number): Promise<void> {
       AUDIT_DISABLE_DOCS: app.isPackaged ? '1' : undefined,
       AUDIT_ALLOWED_ORIGINS: VITE_DEV_SERVER_URL
         ? VITE_DEV_SERVER_URL.replace(/\/$/, '')
-        : 'file://,null',
+        : 'file://',
       TESSDATA_PREFIX: app.isPackaged
         ? path.join(process.resourcesPath, 'tesseract', 'tessdata')
         : undefined
@@ -272,42 +309,82 @@ async function startPythonBackend(port: number): Promise<void> {
       console.error(`[Python Error] ${data.toString().trim()}`)
     })
 
+    let settled = false
+    let checkReady: NodeJS.Timeout | null = null
+    let startupTimeout: NodeJS.Timeout | null = null
+
+    const cleanupStartupTimers = () => {
+      if (checkReady) clearInterval(checkReady)
+      if (startupTimeout) clearTimeout(startupTimeout)
+    }
+
     pythonProcess.on('error', (err) => {
       console.error('[Main] Failed to start Python backend:', err)
-      reject(err)
+      cleanupStartupTimers()
+      if (!settled) {
+        settled = true
+        reject(err)
+      }
+    })
+
+    pythonProcess.on('exit', (code, signal) => {
+      console.error(`[Main] Python backend terminated with code ${code} and signal ${signal}`)
+      const crashedDuringStartup = !settled
+      pythonProcess = null
+      cleanupStartupTimers()
+      publishBackendCrash({ code, signal })
+      if (crashedDuringStartup) {
+        settled = true
+        reject(new Error(`Python backend terminated before startup completed (${code ?? signal ?? 'unknown'})`))
+      }
     })
 
     // Wait for server to be ready
-    const checkReady = setInterval(async () => {
+    checkReady = setInterval(async () => {
       try {
         const res = await fetch(`http://127.0.0.1:${port}/health`)
         if (res.ok) {
-          clearInterval(checkReady)
+          cleanupStartupTimers()
           console.log(`[Main] Python backend ready on port ${port}`)
-          resolve()
+          if (!settled) {
+            settled = true
+            resolve()
+          }
         }
       } catch {
         // not ready yet
       }
     }, 500)
 
-    setTimeout(() => {
-      clearInterval(checkReady)
-      reject(new Error('Python backend failed to start within 30 seconds'))
+    startupTimeout = setTimeout(() => {
+      cleanupStartupTimers()
+      if (!settled) {
+        settled = true
+        reject(new Error('Python backend failed to start within 30 seconds'))
+      }
     }, 30000)
   })
 }
 
 function stopPythonBackend(): void {
-  if (pythonProcess) {
-    console.log('[Main] Stopping Python backend...')
-    pythonProcess.kill('SIGTERM')
-    pythonProcess = null
-  }
+  const proc = pythonProcess
+  if (!proc) return
+
+  console.log('[Main] Stopping Python backend...')
+  proc.kill('SIGTERM')
+
+  const killTimeout = setTimeout(() => {
+    if (pythonProcess === proc) {
+      console.warn('[Main] Python backend did not exit after SIGTERM; sending SIGKILL.')
+      proc.kill('SIGKILL')
+    }
+  }, 3000)
+
+  proc.once('exit', () => clearTimeout(killTimeout))
 }
 
 async function createWindow(): Promise<void> {
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     show: true,
@@ -317,7 +394,7 @@ async function createWindow(): Promise<void> {
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: true,
-      sandbox: false
+      sandbox: true
     }
   })
 
@@ -488,7 +565,10 @@ app.on('window-all-closed', () => {
 app.commandLine.appendSwitch('disable-gpu-vsync')
 app.commandLine.appendSwitch('ignore-gpu-blocklist')
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  installContentSecurityPolicy()
+  return createWindow()
+})
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {

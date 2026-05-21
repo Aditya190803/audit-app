@@ -3,7 +3,11 @@ from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from backend.database import get_db
-from backend.schemas import TransactionResponse, ParseRequest
+from backend.schemas import (
+    ReviewStatusUpdate,
+    TransactionNotesUpdate,
+    TransactionResponse,
+)
 from backend.services.session_service import SessionService
 from backend.services.pdf_service import PDFService
 from backend.services.csv_service import CSVService
@@ -76,9 +80,14 @@ def list_parsers():
     return registry.parser_list()
 
 @router.get("/session/{session_id}", response_model=List[TransactionResponse])
-def get_transactions(session_id: int, db: Session = Depends(get_db)):
+def get_transactions(
+    session_id: int,
+    limit: int = Query(1000, ge=1, le=10000),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
     service = SessionService(db)
-    return service.get_transactions(session_id)
+    return service.get_transactions(session_id, limit=limit, offset=offset)
 
 @router.post("/parse")
 async def parse_files(
@@ -302,28 +311,28 @@ def get_tag_summary(session_id: int, db: Session = Depends(get_db)):
 @router.post("/{transaction_id}/review")
 def update_review_status(
     transaction_id: int,
-    status: str = Query(...),
+    data: ReviewStatusUpdate,
     db: Session = Depends(get_db)
 ):
     """Update review status: unreviewed, reviewed, needs_review, flagged"""
     service = SessionService(db)
-    tx = service.update_transaction(transaction_id, review_status=status)
+    tx = service.update_transaction(transaction_id, review_status=data.status.value)
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
-    return {"success": True, "review_status": status}
+    return {"success": True, "review_status": data.status.value}
 
 @router.post("/{transaction_id}/notes")
 def update_transaction_notes(
     transaction_id: int,
-    notes: str = Query(...),
+    data: TransactionNotesUpdate,
     db: Session = Depends(get_db)
 ):
     """Add or update user notes on a transaction"""
     service = SessionService(db)
-    tx = service.update_transaction(transaction_id, user_notes=notes)
+    tx = service.update_transaction(transaction_id, user_notes=data.notes)
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
-    return {"success": True, "user_notes": notes}
+    return {"success": True, "user_notes": data.notes}
 
 @router.post("/{transaction_id}/exported")
 def mark_transaction_exported(

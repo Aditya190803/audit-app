@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { X, RotateCcw, Plus, Trash2, Save, RefreshCw, Download } from 'lucide-react'
 import { useSettingsStore } from '../stores/settingsStore'
 import type { AppUpdateStatus } from '../types/electron'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 
 interface SettingsPanelProps {
   isOpen: boolean
@@ -20,6 +21,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
     status: 'idle',
     message: 'Updates have not been checked yet.'
   })
+  const panelRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(panelRef, isOpen, onClose)
 
   useEffect(() => {
     if (isOpen) loadSettings()
@@ -94,9 +97,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] w-full max-w-lg max-h-[85vh] flex flex-col">
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] w-full max-w-lg max-h-[85vh] flex flex-col"
+      >
         <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)]">
-          <h2 className="text-sm font-semibold text-[var(--text-primary)]">Settings</h2>
+          <h2 id="settings-title" className="text-sm font-semibold text-[var(--text-primary)]">Settings</h2>
           <button
             onClick={onClose}
             className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] rounded-[var(--radius-sm)] transition-colors duration-150"
