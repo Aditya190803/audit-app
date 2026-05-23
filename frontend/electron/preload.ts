@@ -34,6 +34,7 @@ export interface ElectronAPI {
   installUpdate: () => Promise<{ success: boolean; error?: string }>
   onUpdateStatus: (callback: (status: AppUpdateStatus) => void) => () => void
   onBackendCrashed: (callback: (event: BackendCrashEvent) => void) => () => void
+  onLicenseRevoked: (callback: () => void) => () => void
   readExampleFiles: () => Promise<{ folders: Record<string, string[]>; clientList: string | null }>
   readFileBase64: (filePath: string) => Promise<{ name: string; data: string; path: string } | null>
 }
@@ -55,6 +56,11 @@ const api: ElectronAPI = {
     const handler = (_event: IpcRendererEvent, payload: BackendCrashEvent) => callback(payload)
     ipcRenderer.on('backend-crashed', handler)
     return () => ipcRenderer.removeListener('backend-crashed', handler)
+  },
+  onLicenseRevoked: (callback) => {
+    const handler = () => callback()
+    ipcRenderer.on('license-revoked', handler)
+    return () => ipcRenderer.removeListener('license-revoked', handler)
   },
   readExampleFiles: () => ipcRenderer.invoke('read-example-files'),
   readFileBase64: (filePath) => ipcRenderer.invoke('read-file-base64', filePath)
