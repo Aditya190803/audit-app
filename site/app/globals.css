@@ -1,0 +1,180 @@
+@import "tailwindcss";
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/*  DESIGN TOKENS — matching Electron app (Audit Studio)                     */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Core palette — Slate foundations with teal accent */
+  --bg:              #f8f9fb;
+  --bg-raised:       #f1f3f6;
+  --surface:         #ffffff;
+  --surface-hover:   #f5f6f8;
+  --surface-active:  #eef0f4;
+  --surface-inset:   #f3f4f7;
+
+  /* Borders */
+  --border:          #e2e5eb;
+  --border-strong:   #c8cdd6;
+  --border-subtle:   #eceef2;
+
+  /* Brand — Deep teal */
+  --primary:         #0d9488;
+  --primary-hover:   #0f766e;
+  --primary-subtle:  #ccfbf1;
+  --primary-muted:   #99f6e4;
+  --primary-bg:      #f0fdfa;
+
+  /* Semantic */
+  --success:         #059669;
+  --success-subtle:  #d1fae5;
+  --success-bg:      #ecfdf5;
+  --warning:         #d97706;
+  --warning-subtle:  #fef3c7;
+  --warning-bg:      #fffbeb;
+  --danger:          #dc2626;
+  --danger-subtle:   #fee2e2;
+  --danger-bg:       #fef2f2;
+
+  /* Text */
+  --text-primary:    #111827;
+  --text-secondary:  #4b5563;
+  --text-tertiary:   #9ca3af;
+  --text-on-primary: #ffffff;
+
+  /* Radii */
+  --radius-sm:       6px;
+  --radius-md:       8px;
+  --radius-lg:       12px;
+  --radius-xl:       16px;
+  --radius-2xl:      20px;
+
+  /* Shadows */
+  --shadow-xs:       0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm:       0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md:       0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
+  --shadow-lg:       0 10px 15px -3px rgba(0, 0, 0, 0.06), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+  --shadow-xl:       0 20px 25px -5px rgba(0, 0, 0, 0.06), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+  --shadow-ring:     0 0 0 3px rgba(13, 148, 136, 0.15);
+
+  /* Transitions */
+  --ease-out:        cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out:     cubic-bezier(0.65, 0, 0.35, 1);
+  --duration-fast:   120ms;
+  --duration-normal: 200ms;
+  --duration-slow:   350ms;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-raised: var(--bg-raised);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-active: var(--surface-active);
+  --color-surface-inset: var(--surface-inset);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-subtle: var(--border-subtle);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-subtle: var(--primary-subtle);
+  --color-primary-muted: var(--primary-muted);
+  --color-primary-bg: var(--primary-bg);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains-mono);
+}
+
+/* ── Base ── */
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+::selection {
+  background: var(--primary-subtle);
+  color: var(--primary-hover);
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+
+/* ── Animations ── */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes typewriter-cursor {
+  0%, 100% { border-color: var(--primary); }
+  50% { border-color: transparent; }
+}
+
+@keyframes draw-line {
+  from { stroke-dashoffset: 100; }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes appear {
+  from { opacity: 0; transform: scale(0.95) translateY(4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.animate-fade-in { animation: fade-in 0.4s var(--ease-out) both; }
+.animate-fade-in-up { animation: fade-in-up 0.5s var(--ease-out) both; }
+.animate-appear { animation: appear 0.4s var(--ease-out) both; }
+
+/* Stagger children */
+.stagger > * {
+  animation: fade-in-up 0.5s var(--ease-out) both;
+}
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 80ms; }
+.stagger > *:nth-child(3) { animation-delay: 160ms; }
+.stagger > *:nth-child(4) { animation-delay: 240ms; }
+.stagger > *:nth-child(5) { animation-delay: 320ms; }
+.stagger > *:nth-child(6) { animation-delay: 400ms; }
+
+/* ── Focus ── */
+*:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Reduced Motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-fade-in-up,
+  .animate-appear,
+  .stagger > * {
+    animation: none !important;
+  }
+}

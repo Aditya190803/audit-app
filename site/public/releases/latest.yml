@@ -1,0 +1,8 @@
+version: 1.0.0
+files:
+  - url: Bank-Audit-App-Setup-1.0.0.exe
+    sha512: PLACEHOLDER_SHA512_HASH
+    size: 0
+path: Bank-Audit-App-Setup-1.0.0.exe
+sha512: PLACEHOLDER_SHA512_HASH
+releaseDate: "2025-01-01T00:00:00.000Z"
