@@ -203,9 +203,9 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
 
   // Load parsers on mount
   useEffect(() => {
-    getParsers().then((res) => {
+    getParsers().then((res: { data: { name: string; display_name: string }[] }) => {
       setParsers(res.data)
-    }).catch((e) => {
+    }).catch((e: unknown) => {
       console.error('[FileDropZone] Failed to load parsers:', e)
     })
   }, [])

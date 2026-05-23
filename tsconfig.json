@@ -15,7 +15,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "baseUrl": "http://localhost:5173",
+    "baseUrl": ".",
     "paths": {
       "@/*": ["frontend/src/*"],
       "@electron/*": ["frontend/electron/*"]
