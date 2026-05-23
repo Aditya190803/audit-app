@@ -38,8 +38,8 @@ type UpdateStatus = {
   percent?: number
 }
 
-const UPDATE_FEED_URL = process.env.UPDATE_FEED_URL || 'https://bankaudit.vercel.app/releases'
-const LICENSE_CHECK_URL = process.env.LICENSE_CHECK_URL || 'https://bankaudit.vercel.app/api/license'
+const UPDATE_FEED_URL = process.env.UPDATE_FEED_URL || 'https://the-ska-auditing-app.vercel.app/releases'
+const LICENSE_CHECK_URL = process.env.LICENSE_CHECK_URL || 'https://the-ska-auditing-app.vercel.app/api/license'
 
 type BackendCrashPayload = {
   code: number | null
@@ -76,7 +76,7 @@ function installContentSecurityPolicy(): void {
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
     "img-src 'self' data: blob:",
-    "connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:* https://bankaudit.vercel.app",
+    "connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:* https://the-ska-auditing-app.vercel.app",
     "worker-src 'self' blob:"
   ].join('; ')
 

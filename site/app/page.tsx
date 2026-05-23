@@ -28,7 +28,7 @@ import {
   MoreHorizontal,
 } from "lucide-react";
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || "1.0.0";
 
 type Platform = "windows" | "mac" | "linux";
 
@@ -55,7 +55,7 @@ const platformInfo: Record<
     label: "Download for Windows",
     shortLabel: "Windows",
     icon: <Monitor className="h-5 w-5" strokeWidth={1.5} />,
-    fileName: `Bank-Audit-App-Setup-${APP_VERSION}.exe`,
+    fileName: `Bank.Audit.App.Setup.${APP_VERSION}.exe`,
     format: ".exe installer",
     available: true,
   },
@@ -63,9 +63,9 @@ const platformInfo: Record<
     label: "Download for macOS",
     shortLabel: "macOS",
     icon: <Apple className="h-5 w-5" strokeWidth={1.5} />,
-    fileName: `Bank-Audit-App-${APP_VERSION}.dmg`,
+    fileName: `Bank.Audit.App-${APP_VERSION}-arm64.dmg`,
     format: ".dmg",
-    available: false,
+    available: true,
   },
   linux: {
     label: "Download for Linux",
@@ -83,9 +83,9 @@ const platformInfo: Record<
         <path d="M12 2C9.24 2 7 5.58 7 10c0 2.05.5 3.9 1.3 5.32C7.06 16.55 5 17.64 5 19.5 5 21.43 7.24 22 10 22h4c2.76 0 5-.57 5-2.5 0-1.86-2.06-2.95-3.3-4.18C16.5 13.9 17 12.05 17 10c0-4.42-2.24-8-5-8z" />
       </svg>
     ),
-    fileName: `Bank-Audit-App-${APP_VERSION}.AppImage`,
+    fileName: `Bank.Audit.App-${APP_VERSION}.AppImage`,
     format: ".AppImage",
-    available: false,
+    available: true,
   },
 };
 
