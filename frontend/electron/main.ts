@@ -193,6 +193,21 @@ function resolveBackendPath(): { command: string; args: string[]; cwd: string } 
 
 async function startPythonBackend(port: number): Promise<void> {
   return new Promise((resolve, reject) => {
+    // Ensure writeable directories exist before spawning the Python backend
+    try {
+      const dbDir = app.isPackaged ? app.getPath('userData') : APP_ROOT;
+      const uploadsDir = dataPath('uploads');
+      const exportsDir = dataPath('exports');
+
+      for (const dir of [dbDir, uploadsDir, exportsDir]) {
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+      }
+    } catch (err) {
+      console.error('[Main] Failed to create data directories:', err);
+    }
+
     const { command, args, cwd } = resolveBackendPath()
     const allArgs = [...args, '--port', String(port)]
 

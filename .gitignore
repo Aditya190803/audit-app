@@ -34,7 +34,8 @@ __pycache__/
 env/
 venv/
 ENV/
-build/
+build/*
+!build/icon.png
 develop-eggs/
 dist/
 downloads/
