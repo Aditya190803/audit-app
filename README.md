@@ -28,6 +28,13 @@ audit-app/
 │   │   ├── lib/          # API client
 │   │   └── types/        # TypeScript interfaces
 │   └── index.html
+├── site/                 # Next.js update & download site (deployed on Vercel)
+│   ├── app/
+│   │   ├── api/update/   # Update manifest API for electron-updater
+│   │   ├── layout.tsx    # Root layout
+│   │   ├── page.tsx      # Landing / download page
+│   │   └── globals.css   # Design system
+│   └── public/releases/  # Release artifacts (latest.yml, installers)
 ├── resources/            # Bundled runtime resources
 │   ├── python-dist/      # PyInstaller output (built)
 │   └── tesseract/        # OCR engine (built)
@@ -68,6 +75,20 @@ pip install -r backend\requirements.txt
 ```bash
 bun run dev
 ```
+
+### Update Site (Next.js)
+
+```bash
+cd site
+bun install
+bun run dev     # http://localhost:3000
+```
+
+The site serves as:
+- **Download page** for the latest Windows installer
+- **Update API** (`/api/update`) that the Electron app checks for new versions
+
+Deployed on **Vercel**. After building a new release, copy `latest.yml` to `site/public/releases/`.
 
 ## Build
 
@@ -113,6 +134,11 @@ bun run dist:win       # Full Windows installer
 - **pytesseract** — OCR (scanned PDFs)
 - **PyInstaller** — Python bundling
 
+### Update Site
+- **Next.js 16** — React framework (App Router)
+- **Tailwind CSS v4** — Styling
+- **Vercel** — Hosting & deployment
+
 ## Architecture
 
 The app uses a local HTTP bridge pattern:
@@ -124,6 +150,14 @@ The app uses a local HTTP bridge pattern:
 5. On quit, Electron gracefully terminates the Python process
 
 This avoids Webpack/bundler issues and keeps Python logic fully isolated.
+
+### Auto-Updates
+
+The app uses `electron-updater` with a **generic provider** pointed at the Vercel-hosted update site. When the user checks for updates:
+
+1. The app fetches `/releases/latest.yml` from the site
+2. `electron-updater` compares versions and downloads the new installer if available
+3. The update is installed on the next app restart
 
 ## License
 

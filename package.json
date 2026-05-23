@@ -13,6 +13,8 @@
     "preview": "electron-vite preview",
     "dist": "bun run verify:prod && electron-builder",
     "dist:win": "bun run verify:prod && electron-builder --win",
+    "dist:mac": "bun run verify:prod && electron-builder --mac",
+    "dist:linux": "bun run verify:prod && electron-builder --linux",
     "postinstall": "electron-builder install-app-deps",
     "typecheck": "tsc --noEmit",
     "typecheck:watch": "tsc --noEmit --watch",
@@ -79,6 +81,14 @@
     ],
     "win": {
       "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.finance"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Office"
     }
   }
 }

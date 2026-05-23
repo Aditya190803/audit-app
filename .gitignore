@@ -69,3 +69,7 @@ Thumbs.db
 # Uploads
 uploads/
 backend.spec
+
+# Site (Next.js sub-project)
+site/.next/
+site/node_modules/
