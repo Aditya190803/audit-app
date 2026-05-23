@@ -79,6 +79,26 @@ export function AppShell() {
     })
   }, [pushToast])
 
+  // Auto-update toast: when an update is downloaded, show a persistent toast
+  useEffect(() => {
+    if (!window.electronAPI?.onUpdateStatus) return undefined
+    return window.electronAPI.onUpdateStatus((status) => {
+      if (status.status === 'downloaded') {
+        pushToast({
+          message: `Update v${status.version || 'new'} ready to install`,
+          type: 'update',
+          persistent: true,
+          action: {
+            label: 'Install & Restart',
+            onClick: () => {
+              window.electronAPI.installUpdate()
+            },
+          },
+        })
+      }
+    })
+  }, [pushToast])
+
   // Active view
   const [activeView, setActiveView] = useState<'data' | 'review'>('data')
 

@@ -8,6 +8,8 @@ type ContextPanelMode = 'review' | 'pdf'
 interface Toast {
   id: number
   message: string
+  type?: 'success' | 'info' | 'update'
+  persistent?: boolean
   action?: { label: string; onClick: () => void }
 }
 
@@ -76,7 +78,9 @@ export const useUIStore = create<UIState>((set, get) => ({
   pushToast: (toast) => {
     const id = Date.now()
     set((s) => ({ toasts: [...s.toasts, { ...toast, id }] }))
-    setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), 5000)
+    if (!toast.persistent) {
+      setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), 5000)
+    }
   },
   popToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),

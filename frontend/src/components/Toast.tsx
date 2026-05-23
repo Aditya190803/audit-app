@@ -1,6 +1,18 @@
 import React from 'react'
 import { useUIStore } from '../stores/uiStore'
-import { X, CheckCircle } from 'lucide-react'
+import { X, CheckCircle, Info, ArrowDownCircle } from 'lucide-react'
+
+function ToastIcon({ type }: { type?: 'success' | 'info' | 'update' }) {
+  switch (type) {
+    case 'update':
+      return <ArrowDownCircle className="h-4 w-4 text-[var(--primary)] shrink-0" strokeWidth={1.5} />
+    case 'info':
+      return <Info className="h-4 w-4 text-[var(--primary)] shrink-0" strokeWidth={1.5} />
+    case 'success':
+    default:
+      return <CheckCircle className="h-4 w-4 text-[var(--success)] shrink-0" strokeWidth={1.5} />
+  }
+}
 
 export const ToastContainer: React.FC = () => {
   const { toasts, popToast } = useUIStore()
@@ -14,7 +26,7 @@ export const ToastContainer: React.FC = () => {
           key={t.id}
           className="flex items-center gap-3 px-4 py-3 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-[var(--shadow-xl)] animate-slide-in-right"
         >
-          <CheckCircle className="h-4 w-4 text-[var(--success)] shrink-0" strokeWidth={1.5} />
+          <ToastIcon type={t.type} />
           <span className="text-sm text-[var(--text-primary)] flex-1">{t.message}</span>
           {t.action && (
             <button
@@ -35,3 +47,4 @@ export const ToastContainer: React.FC = () => {
     </div>
   )
 }
+
