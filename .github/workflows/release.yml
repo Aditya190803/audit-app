@@ -79,26 +79,31 @@ jobs:
             name: Windows-x64
             platform: windows
             build-flag: --win --x64
+            python-arch: x64
             artifact-glob: "out/dist/*.exe\nout/dist/*.blockmap\nout/dist/latest.yml"
           - os: windows-11-arm
             name: Windows-arm64
             platform: windows
             build-flag: --win --arm64
+            python-arch: x64
             artifact-glob: "out/dist/*.exe\nout/dist/*.blockmap\nout/dist/latest.yml"
           - os: macos-latest
             name: macOS
             platform: macos
             build-flag: --mac --x64 --arm64
+            python-arch: arm64
             artifact-glob: "out/dist/*.dmg\nout/dist/*.blockmap\nout/dist/latest-mac.yml"
           - os: ubuntu-latest
             name: Linux-x64
             platform: linux
             build-flag: --linux --x64
+            python-arch: x64
             artifact-glob: "out/dist/*.AppImage\nout/dist/latest-linux.yml"
           - os: ubuntu-24.04-arm
             name: Linux-arm64
             platform: linux
             build-flag: --linux --arm64
+            python-arch: arm64
             artifact-glob: "out/dist/*.AppImage\nout/dist/latest-linux.yml"
 
     steps:
@@ -117,6 +122,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          architecture: ${{ matrix.python-arch }}
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
