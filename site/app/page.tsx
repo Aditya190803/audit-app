@@ -43,33 +43,57 @@ function detectOS(): Platform {
 const platformInfo: Record<
   Platform,
   {
-    label: string;
-    shortLabel: string;
+    name: string;
     icon: React.ReactNode;
-    fileName: string;
-    format: string;
-    available: boolean;
+    downloads: Record<
+      "x64" | "arm64",
+      {
+        label: string;
+        fileName: string;
+        format: string;
+        available: boolean;
+      }
+    >;
   }
 > = {
   windows: {
-    label: "Download for Windows",
-    shortLabel: "Windows",
+    name: "Windows",
     icon: <Monitor className="h-5 w-5" strokeWidth={1.5} />,
-    fileName: `Bank.Audit.App.Setup.${APP_VERSION}.exe`,
-    format: ".exe installer",
-    available: true,
+    downloads: {
+      x64: {
+        label: "Download for Windows (64-bit)",
+        fileName: `Bank.Audit.App.Setup.${APP_VERSION}.exe`,
+        format: ".exe installer",
+        available: true,
+      },
+      arm64: {
+        label: "Download for Windows (ARM64)",
+        fileName: `Bank.Audit.App.Setup.${APP_VERSION}-arm64.exe`,
+        format: ".exe installer",
+        available: true,
+      },
+    },
   },
   mac: {
-    label: "Download for macOS",
-    shortLabel: "macOS",
+    name: "macOS",
     icon: <Apple className="h-5 w-5" strokeWidth={1.5} />,
-    fileName: `Bank.Audit.App-${APP_VERSION}-arm64.dmg`,
-    format: ".dmg",
-    available: true,
+    downloads: {
+      x64: {
+        label: "Download for macOS (Intel)",
+        fileName: `Bank.Audit.App-${APP_VERSION}.dmg`,
+        format: ".dmg",
+        available: true,
+      },
+      arm64: {
+        label: "Download for macOS (Apple Silicon)",
+        fileName: `Bank.Audit.App-${APP_VERSION}-arm64.dmg`,
+        format: ".dmg",
+        available: true,
+      },
+    },
   },
   linux: {
-    label: "Download for Linux",
-    shortLabel: "Linux",
+    name: "Linux",
     icon: (
       <svg
         className="h-5 w-5"
@@ -83,9 +107,20 @@ const platformInfo: Record<
         <path d="M12 2C9.24 2 7 5.58 7 10c0 2.05.5 3.9 1.3 5.32C7.06 16.55 5 17.64 5 19.5 5 21.43 7.24 22 10 22h4c2.76 0 5-.57 5-2.5 0-1.86-2.06-2.95-3.3-4.18C16.5 13.9 17 12.05 17 10c0-4.42-2.24-8-5-8z" />
       </svg>
     ),
-    fileName: `Bank.Audit.App-${APP_VERSION}.AppImage`,
-    format: ".AppImage",
-    available: true,
+    downloads: {
+      x64: {
+        label: "Download for Linux (64-bit)",
+        fileName: `Bank.Audit.App-${APP_VERSION}.AppImage`,
+        format: ".AppImage",
+        available: true,
+      },
+      arm64: {
+        label: "Download for Linux (ARM64)",
+        fileName: `Bank.Audit.App-${APP_VERSION}-arm64.AppImage`,
+        format: ".AppImage",
+        available: true,
+      },
+    },
   },
 };
 
@@ -435,15 +470,74 @@ function AppMockup() {
 export default function Home() {
   const [detectedOS, setDetectedOS] = useState<Platform>("windows");
   const [showAllPlatforms, setShowAllPlatforms] = useState(false);
+  const [appVersion, setAppVersion] = useState("1.0.0");
+  const [platforms, setPlatforms] = useState(platformInfo);
   const heroRef = useInView(0.1);
   const featuresRef = useInView();
   const downloadRef = useInView();
 
   useEffect(() => {
     setDetectedOS(detectOS());
-  }, []);
 
-  const primaryPlatform = platformInfo[detectedOS];
+    // Fetch the latest version manifest dynamically
+    fetch("/releases/latest.yml")
+      .then((res) => {
+        if (!res.ok) throw new Error("Manifest not found");
+        return res.text();
+      })
+      .then((yaml) => {
+        const match = yaml.match(/^version:\s*(.+)$/m);
+        if (match && match[1]) {
+          const latestVersion = match[1].trim();
+          setAppVersion(latestVersion);
+          
+          setPlatforms({
+            windows: {
+              ...platformInfo.windows,
+              downloads: {
+                x64: {
+                  ...platformInfo.windows.downloads.x64,
+                  fileName: `Bank.Audit.App.Setup.${latestVersion}.exe`,
+                },
+                arm64: {
+                  ...platformInfo.windows.downloads.arm64,
+                  fileName: `Bank.Audit.App.Setup.${latestVersion}-arm64.exe`,
+                },
+              },
+            },
+            mac: {
+              ...platformInfo.mac,
+              downloads: {
+                x64: {
+                  ...platformInfo.mac.downloads.x64,
+                  fileName: `Bank.Audit.App-${latestVersion}.dmg`,
+                },
+                arm64: {
+                  ...platformInfo.mac.downloads.arm64,
+                  fileName: `Bank.Audit.App-${latestVersion}-arm64.dmg`,
+                },
+              },
+            },
+            linux: {
+              ...platformInfo.linux,
+              downloads: {
+                x64: {
+                  ...platformInfo.linux.downloads.x64,
+                  fileName: `Bank.Audit.App-${latestVersion}.AppImage`,
+                },
+                arm64: {
+                  ...platformInfo.linux.downloads.arm64,
+                  fileName: `Bank.Audit.App-${latestVersion}-arm64.AppImage`,
+                },
+              },
+            },
+          });
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to fetch latest version manifest:", err);
+      });
+  }, []);
 
   return (
     <div className="flex flex-col flex-1">
@@ -510,23 +604,31 @@ export default function Home() {
             </div>
 
             {/* CTA */}
-            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-              {primaryPlatform.available ? (
-                <a
-                  href={`/releases/${primaryPlatform.fileName}`}
-                  className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-primary px-5 py-2.5 text-sm font-medium text-white transition-all duration-150 hover:bg-primary-hover hover:-translate-y-px shadow-sm cursor-pointer"
-                >
-                  <Download className="h-4 w-4" strokeWidth={2} />
-                  {primaryPlatform.label}
-                </a>
-              ) : (
-                <span className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-primary/40 px-5 py-2.5 text-sm font-medium text-white/70 cursor-not-allowed">
-                  <Download className="h-4 w-4" strokeWidth={2} />
-                  {primaryPlatform.label} — Coming Soon
-                </span>
-              )}
+            <div className="mt-8 flex flex-col items-center justify-center gap-3">
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                {Object.entries(platforms[detectedOS].downloads).map(([arch, info]) => {
+                  return info.available ? (
+                    <a
+                      key={arch}
+                      href={`/releases/${info.fileName}`}
+                      className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-primary px-5 py-2.5 text-sm font-medium text-white transition-all duration-150 hover:bg-primary-hover hover:-translate-y-px shadow-sm cursor-pointer"
+                    >
+                      <Download className="h-4 w-4" strokeWidth={2} />
+                      {info.label}
+                    </a>
+                  ) : (
+                    <span
+                      key={arch}
+                      className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-primary/40 px-5 py-2.5 text-sm font-medium text-white/70 cursor-not-allowed"
+                    >
+                      <Download className="h-4 w-4" strokeWidth={2} />
+                      {info.label} — Coming Soon
+                    </span>
+                  );
+                })}
+              </div>
               <span className="text-xs text-text-tertiary">
-                v{APP_VERSION} · Offline only
+                v{appVersion} · Offline only
               </span>
             </div>
           </div>
@@ -596,39 +698,44 @@ export default function Home() {
               Download
             </h2>
             <p className="mt-2 text-sm text-text-secondary">
-              Version {APP_VERSION} · All data stays local
+              Version {appVersion} · All data stays local
             </p>
           </div>
 
           {/* Primary download */}
           <div
-            className={`mt-10 mx-auto max-w-sm transition-all duration-500 delay-100 ${
+            className={`mt-10 mx-auto max-w-md transition-all duration-500 delay-100 ${
               downloadRef.inView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
             }`}
           >
             <div className="rounded-[var(--radius-lg)] border border-primary/20 bg-surface p-6 text-center shadow-sm">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-[var(--radius-lg)] bg-primary-bg text-primary">
-                {primaryPlatform.icon}
+                {platforms[detectedOS].icon}
               </div>
               <h3 className="mt-4 text-sm font-semibold text-text-primary">
-                {primaryPlatform.shortLabel}
+                {platforms[detectedOS].name} Downloads
               </h3>
-              <p className="text-xs text-text-tertiary font-mono mt-1">
-                {primaryPlatform.format}
-              </p>
-              {primaryPlatform.available ? (
-                <a
-                  href={`/releases/${primaryPlatform.fileName}`}
-                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-[var(--radius-md)] bg-primary px-4 py-2.5 text-sm font-medium text-white transition-all duration-150 hover:bg-primary-hover hover:-translate-y-px shadow-xs cursor-pointer"
-                >
-                  <Download className="h-4 w-4" strokeWidth={2} />
-                  Download for {primaryPlatform.shortLabel}
-                </a>
-              ) : (
-                <span className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-[var(--radius-md)] bg-surface-hover border border-border px-4 py-2.5 text-sm font-medium text-text-tertiary cursor-not-allowed">
-                  Coming Soon
-                </span>
-              )}
+              <div className="mt-4 flex flex-col gap-2">
+                {Object.entries(platforms[detectedOS].downloads).map(([arch, info]) => {
+                  return info.available ? (
+                    <a
+                      key={arch}
+                      href={`/releases/${info.fileName}`}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-[var(--radius-md)] bg-primary px-4 py-2.5 text-sm font-medium text-white transition-all duration-150 hover:bg-primary-hover hover:-translate-y-px shadow-xs cursor-pointer"
+                    >
+                      <Download className="h-4 w-4" strokeWidth={2} />
+                      {arch === "x64" ? "64-bit Installer (Intel/AMD)" : "ARM64 Installer"}
+                    </a>
+                  ) : (
+                    <span
+                      key={arch}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-[var(--radius-md)] bg-surface-hover border border-border px-4 py-2.5 text-sm font-medium text-text-tertiary cursor-not-allowed"
+                    >
+                      {arch === "x64" ? "64-bit Installer" : "ARM64 Installer"} — Coming Soon
+                    </span>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
@@ -646,33 +753,39 @@ export default function Home() {
             </button>
 
             {showAllPlatforms && (
-              <div className="mt-3 flex justify-center gap-3 animate-fade-in-up">
+              <div className="mt-4 flex flex-wrap justify-center gap-4 animate-fade-in-up">
                 {allPlatforms
                   .filter((p) => p !== detectedOS)
                   .map((p) => {
-                    const info = platformInfo[p];
+                    const plat = platforms[p];
                     return (
                       <div
                         key={p}
-                        className="rounded-[var(--radius-md)] border border-border bg-surface px-4 py-3 text-center min-w-[120px]"
+                        className="rounded-[var(--radius-lg)] border border-border bg-surface p-5 text-center min-w-[200px]"
                       >
-                        <div className="mx-auto flex h-8 w-8 items-center justify-center text-text-tertiary">
-                          {info.icon}
+                        <div className="mx-auto flex h-10 w-10 items-center justify-center text-text-tertiary bg-surface-hover rounded-md">
+                          {plat.icon}
                         </div>
-                        <p className="mt-1.5 text-xs font-medium text-text-primary">{info.shortLabel}</p>
-                        {info.available ? (
-                          <a
-                            href={`/releases/${info.fileName}`}
-                            className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:text-primary-hover transition-colors cursor-pointer"
-                          >
-                            Download
-                            <ExternalLink className="h-2.5 w-2.5" strokeWidth={2} />
-                          </a>
-                        ) : (
-                          <span className="mt-2 inline-block text-[11px] text-text-tertiary">
-                            Coming soon
-                          </span>
-                        )}
+                        <p className="mt-2 text-sm font-semibold text-text-primary">{plat.name}</p>
+                        <div className="mt-3 flex flex-col gap-2">
+                          {Object.entries(plat.downloads).map(([arch, info]) => {
+                            return info.available ? (
+                              <a
+                                key={arch}
+                                href={`/releases/${info.fileName}`}
+                                className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-primary hover:bg-primary-bg transition-colors cursor-pointer"
+                              >
+                                <Download className="h-3.5 w-3.5" />
+                                {arch === "x64" ? "64-bit" : "ARM64"}
+                                <ExternalLink className="h-2.5 w-2.5" strokeWidth={2} />
+                              </a>
+                            ) : (
+                              <span key={arch} className="text-xs text-text-tertiary">
+                                {arch === "x64" ? "64-bit" : "ARM64"} — Coming soon
+                              </span>
+                            );
+                          })}
+                        </div>
                       </div>
                     );
                   })}

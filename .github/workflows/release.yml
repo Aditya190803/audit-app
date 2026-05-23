@@ -77,15 +77,15 @@ jobs:
         include:
           - os: windows-latest
             name: Windows
-            build-flag: --win
+            build-flag: --win x64 arm64
             artifact-glob: "out/dist/*.exe\nout/dist/*.blockmap\nout/dist/latest.yml"
           - os: macos-latest
             name: macOS
-            build-flag: --mac
+            build-flag: --mac x64 arm64
             artifact-glob: "out/dist/*.dmg\nout/dist/*.blockmap\nout/dist/latest-mac.yml"
           - os: ubuntu-latest
             name: Linux
-            build-flag: --linux
+            build-flag: --linux x64 arm64
             artifact-glob: "out/dist/*.AppImage\nout/dist/latest-linux.yml"
 
     steps:
