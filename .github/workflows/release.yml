@@ -15,15 +15,16 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build and publish release
-    runs-on: windows-latest
-
+  # ── Validate tag ──────────────────────────────────────────────
+  validate:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Resolve release tag
         id: release
@@ -65,6 +66,34 @@ jobs:
             git push origin "$TAG"
           fi
 
+  # ── Build per platform ────────────────────────────────────────
+  build:
+    name: Build ${{ matrix.name }}
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows
+            build-flag: --win
+            artifact-glob: "out/dist/*.exe\nout/dist/*.blockmap\nout/dist/latest.yml"
+          - os: macos-latest
+            name: macOS
+            build-flag: --mac
+            artifact-glob: "out/dist/*.dmg\nout/dist/*.blockmap\nout/dist/latest-mac.yml"
+          - os: ubuntu-latest
+            name: Linux
+            build-flag: --linux
+            artifact-glob: "out/dist/*.AppImage\nout/dist/latest-linux.yml"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -78,42 +107,93 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
-      - name: Create Python virtual environment
+      # Python venv — Windows uses pwsh, others use bash
+      - name: Create Python virtual environment (Windows)
+        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           python -m venv .venv
           .\.venv\Scripts\python.exe -m pip install --upgrade pip
           .\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt pytest
 
+      - name: Create Python virtual environment (Unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r backend/requirements.txt pytest
+
       - name: Typecheck frontend and Electron
         run: bun run typecheck
 
-      - name: Run backend tests
+      - name: Run backend tests (Windows)
+        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: .\.venv\Scripts\python.exe -m pytest backend\tests
 
-      - name: Build Windows installer
+      - name: Run backend tests (Unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: .venv/bin/python -m pytest backend/tests
+
+      - name: Build app
+        run: bun run build
+
+      - name: Build Python backend
+        run: bun run build:python
+
+      - name: Build platform installer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          UPDATE_GITHUB_OWNER: ${{ github.repository_owner }}
-          UPDATE_GITHUB_REPO: ${{ github.event.repository.name }}
-          UPDATE_GITHUB_PRIVATE: ${{ github.event.repository.private }}
-        run: |
-          bun run build
-          bun run build:python
-          bunx electron-builder --win --publish never
+        run: bunx electron-builder ${{ matrix.build-flag }} --publish never
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: |
+            ${{ matrix.artifact-glob }}
+          retention-days: 1
+
+  # ── Publish GitHub Release ────────────────────────────────────
+  publish:
+    name: Publish GitHub Release
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find artifacts -type f | sort
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.release.outputs.tag }}
-          name: Bank Audit App ${{ steps.release.outputs.version }}
+          tag_name: ${{ needs.validate.outputs.tag }}
+          name: Bank Audit App ${{ needs.validate.outputs.version }}
           draft: false
           prerelease: false
           make_latest: true
           files: |
-            out/dist/*.exe
-            out/dist/*.blockmap
-            out/dist/latest.yml
+            artifacts/**/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Copy release manifests for update site
+        shell: bash
+        run: |
+          mkdir -p site/public/releases
+          for f in artifacts/latest*.yml; do
+            if [ -f "$f" ]; then
+              cp "$f" site/public/releases/
+              echo "Copied $(basename $f) to site/public/releases/"
+            fi
+          done
