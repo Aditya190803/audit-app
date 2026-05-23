@@ -38,12 +38,8 @@ type UpdateStatus = {
   percent?: number
 }
 
-type GitHubUpdateConfig = {
-  owner: string
-  repo: string
-  token?: string
-  privateRepo: boolean
-}
+const UPDATE_FEED_URL = process.env.UPDATE_FEED_URL || 'https://bankaudit.vercel.app/releases'
+const LICENSE_CHECK_URL = process.env.LICENSE_CHECK_URL || 'https://bankaudit.vercel.app/api/license'
 
 type BackendCrashPayload = {
   code: number | null
@@ -80,7 +76,7 @@ function installContentSecurityPolicy(): void {
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
     "img-src 'self' data: blob:",
-    "connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:*",
+    "connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:* https://bankaudit.vercel.app",
     "worker-src 'self' blob:"
   ].join('; ')
 
@@ -104,28 +100,6 @@ function normalizeUpdateInfo(status: UpdateStatusName, message: string, info?: U
   }
 }
 
-function readOptionalTextFile(filePath?: string): string | null {
-  if (!filePath) return null
-
-  try {
-    const resolved = path.resolve(filePath)
-    if (!fs.existsSync(resolved)) return null
-    return fs.readFileSync(resolved, 'utf8').trim() || null
-  } catch {
-    return null
-  }
-}
-
-function readGitHubUpdateToken(): string | null {
-  return (
-    process.env.UPDATE_GITHUB_TOKEN?.trim() ||
-    process.env.GH_TOKEN?.trim() ||
-    readOptionalTextFile(process.env.UPDATE_GITHUB_TOKEN_FILE) ||
-    readOptionalTextFile(path.join(app.getPath('userData'), 'github-update-token')) ||
-    null
-  )
-}
-
 function dataPath(...segments: string[]): string {
   return app.isPackaged
     ? path.join(app.getPath('userData'), ...segments)
@@ -143,64 +117,15 @@ function exportPathToken(filePath: string): string {
     .digest('hex')
 }
 
-function isTruthyEnv(value?: string): boolean {
-  return value === '1' || value?.toLowerCase() === 'true' || value?.toLowerCase() === 'yes'
-}
-
-function getGitHubUpdateConfig(): GitHubUpdateConfig | null {
-  const repository = process.env.UPDATE_GITHUB_REPOSITORY || process.env.GITHUB_REPOSITORY
-  const [envOwner, envRepo] = [process.env.UPDATE_GITHUB_OWNER, process.env.UPDATE_GITHUB_REPO]
-  const token = readGitHubUpdateToken() || undefined
-  const privateRepo = isTruthyEnv(process.env.UPDATE_GITHUB_PRIVATE) || Boolean(token)
-
-  if (envOwner && envRepo) {
-    return { owner: envOwner, repo: envRepo, token, privateRepo }
-  }
-
-  if (repository) {
-    const match = repository.match(/(?:github\.com[/:])?([^/\s]+)\/([^/\s.]+)(?:\.git)?$/)
-    if (match) {
-      return { owner: match[1], repo: match[2], token, privateRepo }
-    }
-  }
-
-  return null
-}
-
-function configureGitHubUpdates(): { ok: true } | { ok: false; message: string } {
-  const config = getGitHubUpdateConfig()
-  if (!config) {
-    return {
-      ok: false,
-      message: 'Set UPDATE_GITHUB_OWNER and UPDATE_GITHUB_REPO, or GITHUB_REPOSITORY, to enable GitHub release updates.'
-    }
-  }
-
-  if (config.privateRepo && !config.token) {
-    return {
-      ok: false,
-      message: 'Private GitHub updates require GH_TOKEN, UPDATE_GITHUB_TOKEN, UPDATE_GITHUB_TOKEN_FILE, or a github-update-token file in app data.'
-    }
-  }
-
-  autoUpdater.requestHeaders = null
+function configureUpdates(): void {
   autoUpdater.setFeedURL({
-    provider: 'github',
-    owner: config.owner,
-    repo: config.repo,
-    private: config.privateRepo,
-    token: config.token
+    provider: 'generic',
+    url: UPDATE_FEED_URL
   })
-
-  if (config.token) {
-    autoUpdater.addAuthHeader(`token ${config.token}`)
-  }
-
-  return { ok: true }
 }
 
 autoUpdater.on('checking-for-update', () => {
-  publishUpdateStatus({ status: 'checking', message: 'Checking GitHub releases...' })
+  publishUpdateStatus({ status: 'checking', message: 'Checking for updates...' })
 })
 
 autoUpdater.on('update-available', (info) => {
@@ -383,6 +308,23 @@ function stopPythonBackend(): void {
   proc.once('exit', () => clearTimeout(killTimeout))
 }
 
+async function checkLicense(): Promise<'active' | 'revoked'> {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000)
+    const res = await fetch(`${LICENSE_CHECK_URL}?appId=com.bankaudit.app`, {
+      signal: controller.signal
+    })
+    clearTimeout(timeout)
+    if (res.status === 403) return 'revoked'
+    return 'active'
+  } catch {
+    // Network error → fail-open, allow the app to work
+    console.warn('[Main] License check failed (network error) — proceeding as active.')
+    return 'active'
+  }
+}
+
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -418,6 +360,14 @@ async function createWindow(): Promise<void> {
   } else {
     mainWindow.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
+
+  // License check — runs after window loads so the overlay can be shown
+  mainWindow.webContents.once('did-finish-load', async () => {
+    const licenseStatus = await checkLicense()
+    if (licenseStatus === 'revoked') {
+      mainWindow?.webContents.send('license-revoked')
+    }
+  })
 }
 
 // IPC handlers
@@ -525,16 +475,9 @@ ipcMain.handle('check-for-updates', async () => {
     })
   }
 
-  const updateConfig = configureGitHubUpdates()
-  if (!updateConfig.ok) {
-    return publishUpdateStatus({
-      status: 'unsupported',
-      message: updateConfig.message
-    })
-  }
-
   try {
-    publishUpdateStatus({ status: 'checking', message: 'Checking GitHub releases...' })
+    configureUpdates()
+    publishUpdateStatus({ status: 'checking', message: 'Checking for updates...' })
     await autoUpdater.checkForUpdates()
     return updateStatus
   } catch (error) {
@@ -567,7 +510,17 @@ app.commandLine.appendSwitch('ignore-gpu-blocklist')
 
 app.whenReady().then(() => {
   installContentSecurityPolicy()
-  return createWindow()
+  return createWindow().then(() => {
+    // Auto-check for updates 5s after window is ready
+    if (app.isPackaged) {
+      setTimeout(() => {
+        configureUpdates()
+        autoUpdater.checkForUpdates().catch((err) => {
+          console.error('[Main] Auto-update check failed:', err)
+        })
+      }, 5000)
+    }
+  })
 })
 
 app.on('activate', () => {
