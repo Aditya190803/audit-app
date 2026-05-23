@@ -482,10 +482,11 @@ export default function Home() {
     // Fetch the latest version manifest dynamically
     fetch("/releases/latest.yml")
       .then((res) => {
-        if (!res.ok) throw new Error("Manifest not found");
+        if (!res.ok) return null;
         return res.text();
       })
       .then((yaml) => {
+        if (!yaml) return;
         const match = yaml.match(/^version:\s*(.+)$/m);
         if (match && match[1]) {
           const latestVersion = match[1].trim();
@@ -605,31 +606,36 @@ export default function Home() {
 
             {/* CTA */}
             <div className="mt-8 flex flex-col items-center justify-center gap-3">
-              <div className="flex flex-wrap items-center justify-center gap-3">
-                {Object.entries(platforms[detectedOS].downloads).map(([arch, info]) => {
-                  return info.available ? (
+              {platforms[detectedOS].downloads.x64.available ? (
+                <a
+                  href={`/releases/${platforms[detectedOS].downloads.x64.fileName}`}
+                  className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-primary px-5 py-2.5 text-sm font-medium text-white transition-all duration-150 hover:bg-primary-hover hover:-translate-y-px shadow-sm cursor-pointer"
+                >
+                  <Download className="h-4 w-4" strokeWidth={2} />
+                  {platforms[detectedOS].downloads.x64.label}
+                </a>
+              ) : (
+                <span className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-primary/40 px-5 py-2.5 text-sm font-medium text-white/70 cursor-not-allowed">
+                  <Download className="h-4 w-4" strokeWidth={2} />
+                  {platforms[detectedOS].downloads.x64.label} — Coming Soon
+                </span>
+              )}
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-text-tertiary">
+                  v{appVersion} · Offline only
+                </span>
+                {platforms[detectedOS].downloads.arm64.available && (
+                  <>
+                    <span className="text-xs text-text-tertiary">·</span>
                     <a
-                      key={arch}
-                      href={`/releases/${info.fileName}`}
-                      className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-primary px-5 py-2.5 text-sm font-medium text-white transition-all duration-150 hover:bg-primary-hover hover:-translate-y-px shadow-sm cursor-pointer"
+                      href={`/releases/${platforms[detectedOS].downloads.arm64.fileName}`}
+                      className="text-xs text-text-tertiary hover:text-primary transition-colors cursor-pointer"
                     >
-                      <Download className="h-4 w-4" strokeWidth={2} />
-                      {info.label}
+                      ARM64 version
                     </a>
-                  ) : (
-                    <span
-                      key={arch}
-                      className="inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-primary/40 px-5 py-2.5 text-sm font-medium text-white/70 cursor-not-allowed"
-                    >
-                      <Download className="h-4 w-4" strokeWidth={2} />
-                      {info.label} — Coming Soon
-                    </span>
-                  );
-                })}
+                  </>
+                )}
               </div>
-              <span className="text-xs text-text-tertiary">
-                v{appVersion} · Offline only
-              </span>
             </div>
           </div>
 
@@ -716,25 +722,28 @@ export default function Home() {
                 {platforms[detectedOS].name} Downloads
               </h3>
               <div className="mt-4 flex flex-col gap-2">
-                {Object.entries(platforms[detectedOS].downloads).map(([arch, info]) => {
-                  return info.available ? (
-                    <a
-                      key={arch}
-                      href={`/releases/${info.fileName}`}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-[var(--radius-md)] bg-primary px-4 py-2.5 text-sm font-medium text-white transition-all duration-150 hover:bg-primary-hover hover:-translate-y-px shadow-xs cursor-pointer"
-                    >
-                      <Download className="h-4 w-4" strokeWidth={2} />
-                      {arch === "x64" ? "64-bit Installer (Intel/AMD)" : "ARM64 Installer"}
-                    </a>
-                  ) : (
-                    <span
-                      key={arch}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-[var(--radius-md)] bg-surface-hover border border-border px-4 py-2.5 text-sm font-medium text-text-tertiary cursor-not-allowed"
-                    >
-                      {arch === "x64" ? "64-bit Installer" : "ARM64 Installer"} — Coming Soon
-                    </span>
-                  );
-                })}
+                {platforms[detectedOS].downloads.x64.available ? (
+                  <a
+                    href={`/releases/${platforms[detectedOS].downloads.x64.fileName}`}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-[var(--radius-md)] bg-primary px-4 py-2.5 text-sm font-medium text-white transition-all duration-150 hover:bg-primary-hover hover:-translate-y-px shadow-xs cursor-pointer"
+                  >
+                    <Download className="h-4 w-4" strokeWidth={2} />
+                    64-bit Installer (Intel/AMD)
+                  </a>
+                ) : (
+                  <span className="inline-flex w-full items-center justify-center gap-2 rounded-[var(--radius-md)] bg-surface-hover border border-border px-4 py-2.5 text-sm font-medium text-text-tertiary cursor-not-allowed">
+                    64-bit Installer — Coming Soon
+                  </span>
+                )}
+                {platforms[detectedOS].downloads.arm64.available && (
+                  <a
+                    href={`/releases/${platforms[detectedOS].downloads.arm64.fileName}`}
+                    className="inline-flex w-full items-center justify-center gap-1.5 px-4 py-1.5 text-xs font-medium text-text-secondary hover:text-primary transition-colors cursor-pointer"
+                  >
+                    Also available for ARM64
+                    <ExternalLink className="h-3 w-3" strokeWidth={2} />
+                  </a>
+                )}
               </div>
             </div>
           </div>
@@ -767,24 +776,30 @@ export default function Home() {
                           {plat.icon}
                         </div>
                         <p className="mt-2 text-sm font-semibold text-text-primary">{plat.name}</p>
-                        <div className="mt-3 flex flex-col gap-2">
-                          {Object.entries(plat.downloads).map(([arch, info]) => {
-                            return info.available ? (
-                              <a
-                                key={arch}
-                                href={`/releases/${info.fileName}`}
-                                className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-primary hover:bg-primary-bg transition-colors cursor-pointer"
-                              >
-                                <Download className="h-3.5 w-3.5" />
-                                {arch === "x64" ? "64-bit" : "ARM64"}
-                                <ExternalLink className="h-2.5 w-2.5" strokeWidth={2} />
-                              </a>
-                            ) : (
-                              <span key={arch} className="text-xs text-text-tertiary">
-                                {arch === "x64" ? "64-bit" : "ARM64"} — Coming soon
-                              </span>
-                            );
-                          })}
+                        <div className="mt-3 flex flex-col gap-1.5">
+                          {plat.downloads.x64.available ? (
+                            <a
+                              href={`/releases/${plat.downloads.x64.fileName}`}
+                              className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-primary hover:bg-primary-bg transition-colors cursor-pointer"
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                              64-bit
+                              <ExternalLink className="h-2.5 w-2.5" strokeWidth={2} />
+                            </a>
+                          ) : (
+                            <span className="text-xs text-text-tertiary">
+                              64-bit — Coming soon
+                            </span>
+                          )}
+                          {plat.downloads.arm64.available && (
+                            <a
+                              href={`/releases/${plat.downloads.arm64.fileName}`}
+                              className="inline-flex items-center justify-center gap-1 px-3 py-1 rounded-md text-[11px] text-text-tertiary hover:text-primary transition-colors cursor-pointer"
+                            >
+                              ARM64
+                              <ExternalLink className="h-2.5 w-2.5" strokeWidth={2} />
+                            </a>
+                          )}
                         </div>
                       </div>
                     );

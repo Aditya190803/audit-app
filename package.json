@@ -88,7 +88,8 @@
     },
     "linux": {
       "target": "AppImage",
-      "category": "Office"
+      "category": "Office",
+      "icon": "build/icon.png"
     }
   }
 }

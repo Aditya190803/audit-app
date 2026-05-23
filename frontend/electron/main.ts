@@ -177,7 +177,13 @@ function resolveBackendPath(): { command: string; args: string[]; cwd: string } 
       path.join(process.resourcesPath, 'backend', executableName),
       path.join(process.resourcesPath, 'backend', 'backend', executableName)
     ]
-    const exePath = candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0]
+    const exePath = candidates.find((candidate) => {
+      try {
+        return fs.existsSync(candidate) && fs.statSync(candidate).isFile()
+      } catch {
+        return false
+      }
+    }) || candidates[0]
     return { command: exePath, args: [], cwd: path.dirname(exePath) }
   } else {
     const pythonPath = process.platform === 'win32'

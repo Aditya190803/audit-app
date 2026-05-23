@@ -9,9 +9,16 @@ export async function GET(
 
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   if (!token) {
+    // No token available (local dev) — return a minimal fallback for manifests
+    if (file.endsWith(".yml")) {
+      const fallbackVersion = process.env.NEXT_PUBLIC_APP_VERSION || "1.0.0";
+      return new Response(`version: ${fallbackVersion}\n`, {
+        headers: { "Content-Type": "text/yaml; charset=utf-8" },
+      });
+    }
     return NextResponse.json(
       { error: "GITHUB_TOKEN not configured on server" },
-      { status: 500 }
+      { status: 404 }
     );
   }
 
