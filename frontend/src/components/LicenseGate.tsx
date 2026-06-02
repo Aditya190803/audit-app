@@ -1,6 +1,9 @@
 import React from 'react'
 import { AlertTriangle, Mail } from 'lucide-react'
 
+const DEVELOPER_EMAIL = 'adityamer.work@gmail.com'
+const DEVELOPER_PHONE = '+91 8422039965'
+
 export function LicenseGate(): React.ReactElement {
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -25,14 +28,26 @@ export function LicenseGate(): React.ReactElement {
           Please contact the developer to resolve this.
         </p>
 
-        {/* Contact button */}
-        <a
-          href="mailto:adityamer.work@gmail.com"
-          className="mt-6 inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--primary)] px-5 py-2.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-[var(--primary-hover)]"
-        >
-          <Mail className="h-4 w-4" strokeWidth={2} />
-          Contact Developer
-        </a>
+        {/* Contact details */}
+        <div className="mt-6 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg)] px-4 py-3 text-left">
+          <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-[var(--text-tertiary)]">
+            <Mail className="h-3.5 w-3.5" strokeWidth={2} />
+            Developer contact
+          </div>
+          <dl className="mt-3 space-y-2 text-sm">
+            <div>
+              <dt className="text-xs text-[var(--text-secondary)]">Email</dt>
+              <dd className="select-all break-all font-mono text-[var(--text-primary)]">{DEVELOPER_EMAIL}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-[var(--text-secondary)]">Phone</dt>
+              <dd className="select-all font-mono text-[var(--text-primary)]">{DEVELOPER_PHONE}</dd>
+            </div>
+          </dl>
+          <p className="mt-3 text-xs leading-5 text-[var(--text-secondary)]">
+            Send these details with the error code below.
+          </p>
+        </div>
 
         {/* Subtle error code for you to identify the cause */}
         <p className="mt-4 text-[10px] font-mono text-[var(--text-tertiary)]">
