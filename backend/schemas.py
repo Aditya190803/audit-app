@@ -19,8 +19,17 @@ class AuditAction(str, Enum):
     TAG_REMOVED = "tag_removed"
     TAG_CHANGED = "tag_changed"
     ALIAS_ADDED = "alias_added"
+    ALIAS_REMOVED = "alias_removed"
     BROKER_EXCLUDED = "broker_excluded"
+    BROKER_CHANGED = "broker_changed"
     SETTINGS_CHANGED = "settings_changed"
+    SESSION_CREATED = "session_created"
+    SESSION_DELETED = "session_deleted"
+    REVIEW_STATUS_CHANGED = "review_status_changed"
+    NOTES_UPDATED = "notes_updated"
+    RETAG_TRIGGERED = "retag_triggered"
+    PARTY_NAME_UPDATED = "party_name_updated"
+    TRANSACTION_UPDATED = "transaction_updated"
 
 class TransactionBase(BaseModel):
     date: Optional[str] = None
@@ -195,8 +204,18 @@ class FuzzyMatchResponse(BaseModel):
 class ReviewStatusUpdate(BaseModel):
     status: ReviewStatus
 
+class BulkReviewRequest(BaseModel):
+    transaction_ids: List[int]
+    status: ReviewStatus
+
 class TransactionNotesUpdate(BaseModel):
     notes: str = Field(..., max_length=2000)
+
+class TransactionUpdate(BaseModel):
+    """Patch editable fields on a transaction (party name override, description, etc.)."""
+    party_name: Optional[str] = None
+    description: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=2000)
 
 # Update forward references
 TransactionResponse.model_rebuild()

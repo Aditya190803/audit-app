@@ -9,18 +9,18 @@ import sys
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from backend.database import engine, Base
+from backend.migrations import run_startup_migrations
 from backend.security import LocalTokenAuthMiddleware
 from backend.seed import seed_database
 from backend.services.process_pool import shutdown_process_pool
-from backend.api.routes import sessions, transactions, tags, brokers, export, settings, audit
+from backend.api.routes import sessions, transactions, tags, brokers, export, settings, audit, aliases
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    Base.metadata.create_all(bind=engine)
+    run_startup_migrations()
     seed_database()
-    print("[Backend] Database initialized and seeded.")
+    print("[Backend] Database migrated and seeded.")
     yield
     # Shutdown
     shutdown_process_pool()
@@ -75,6 +75,7 @@ app.include_router(brokers.router)
 app.include_router(export.router)
 app.include_router(settings.router)
 app.include_router(audit.router)
+app.include_router(aliases.router)
 
 @app.get("/health")
 def health():

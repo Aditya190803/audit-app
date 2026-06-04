@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Dict, List, Optional
 from backend.database import get_db
 from backend.schemas import (
     ReviewStatusUpdate,
+    BulkReviewRequest,
     TransactionNotesUpdate,
+    TransactionUpdate,
     TransactionResponse,
 )
 from backend.services.session_service import SessionService
@@ -74,10 +76,53 @@ def get_parse_progress(progress_id: str):
         }
     return progress
 
+from fastapi.responses import StreamingResponse
+import asyncio
+
+@router.get("/parse-progress/{progress_id}/stream")
+async def stream_parse_progress(progress_id: str):
+    """SSE endpoint — pushes progress updates until complete or error."""
+    async def event_generator():
+        last_sent = None
+        while True:
+            progress = None
+            with _progress_lock:
+                progress = _parse_progress.get(progress_id)
+            if progress is None:
+                # Not started yet — send a queued placeholder
+                progress = {"id": progress_id, "percent": 0, "message": "Waiting to start...", "stage": "queued"}
+
+            if progress != last_sent:
+                import json as _json
+                yield f"data: {_json.dumps(progress)}\n\n"
+                last_sent = progress
+
+            stage = progress.get("stage", "")
+            if stage in ("complete", "error"):
+                # One final flush then close
+                break
+            await asyncio.sleep(0.4)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/parsers")
 def list_parsers():
     from backend.services.parsers import registry
     return registry.parser_list()
+
+def _clean_response_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    return " ".join(str(value).split()).strip()
+
 
 @router.get("/session/{session_id}", response_model=List[TransactionResponse])
 def get_transactions(
@@ -87,7 +132,15 @@ def get_transactions(
     db: Session = Depends(get_db),
 ):
     service = SessionService(db)
-    return service.get_transactions(session_id, limit=limit, offset=offset)
+    transactions = service.get_transactions(session_id, limit=limit, offset=offset)
+    return [
+        TransactionResponse.model_validate(tx).model_copy(update={
+            "date": _clean_response_text(tx.date),
+            "description": _clean_response_text(tx.description),
+            "party_name": _clean_response_text(tx.party_name),
+        })
+        for tx in transactions
+    ]
 
 @router.post("/parse")
 async def parse_files(
@@ -286,6 +339,7 @@ async def parse_files(
               old_value=None, 
               new_value={"transaction_count": len(transactions), "tag_count": len(tags)},
               session_id=session.id, is_auto=True)
+    session_service.mark_session_status(session.id, "completed")
     _set_parse_progress(
         progress_id,
         100,
@@ -316,9 +370,18 @@ def update_review_status(
 ):
     """Update review status: unreviewed, reviewed, needs_review, flagged"""
     service = SessionService(db)
-    tx = service.update_transaction(transaction_id, review_status=data.status.value)
-    if not tx:
+    existing = service.get_transaction(transaction_id)
+    if not existing:
         raise HTTPException(status_code=404, detail="Transaction not found")
+    old_status = existing.review_status
+    tx = service.update_transaction(transaction_id, review_status=data.status.value)
+    AuditService(db).log(
+        "review_status_changed", "transaction", transaction_id,
+        old_value={"status": old_status},
+        new_value={"status": data.status.value},
+        session_id=tx.session_id,
+        is_auto=False,
+    )
     return {"success": True, "review_status": data.status.value}
 
 @router.post("/{transaction_id}/notes")
@@ -329,9 +392,18 @@ def update_transaction_notes(
 ):
     """Add or update user notes on a transaction"""
     service = SessionService(db)
-    tx = service.update_transaction(transaction_id, user_notes=data.notes)
-    if not tx:
+    existing = service.get_transaction(transaction_id)
+    if not existing:
         raise HTTPException(status_code=404, detail="Transaction not found")
+    old_notes = existing.user_notes
+    tx = service.update_transaction(transaction_id, user_notes=data.notes)
+    AuditService(db).log(
+        "notes_updated", "transaction", transaction_id,
+        old_value={"notes": old_notes},
+        new_value={"notes": data.notes},
+        session_id=tx.session_id,
+        is_auto=False,
+    )
     return {"success": True, "user_notes": data.notes}
 
 @router.post("/{transaction_id}/exported")
@@ -346,3 +418,270 @@ def mark_transaction_exported(
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return {"success": True, "exported_at": tx.exported_at}
+
+@router.post("/bulk-review")
+def bulk_update_review_status(
+    data: BulkReviewRequest,
+    db: Session = Depends(get_db)
+):
+    """Update review status for multiple transactions at once."""
+    service = SessionService(db)
+    audit = AuditService(db)
+    updated = 0
+    updated_by_session: dict[int, List[int]] = {}
+    for tx_id in data.transaction_ids:
+        tx = service.update_transaction(tx_id, review_status=data.status.value)
+        if tx:
+            updated += 1
+            updated_by_session.setdefault(tx.session_id, []).append(tx.id)
+    for log_session_id, tx_ids in updated_by_session.items():
+        audit.log(
+            "review_status_changed", "bulk_transaction",
+            old_value={"transaction_ids": tx_ids},
+            new_value={"status": data.status.value, "count": len(tx_ids)},
+            session_id=log_session_id,
+            is_auto=False
+        )
+    return {"updated_count": updated, "status": data.status.value}
+
+@router.post("/session/{session_id}/retag")
+def retag_session(
+    session_id: int,
+    db: Session = Depends(get_db)
+):
+    """Re-run auto-tagging on all transactions in a session using current settings."""
+    service = SessionService(db)
+    session = service.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Reload clients from the session's original CSV path
+    clients: List[Dict] = []
+    csv_svc = CSVService()
+    if session.csv_path and os.path.exists(session.csv_path):
+        try:
+            clients = csv_svc.parse_client_list(session.csv_path)
+        except Exception:
+            pass  # Proceed with empty clients; broker/suspicious tagging still works
+
+    tagging = TaggingService(db)
+    session_settings = session.settings_snapshot or {}
+    tags = tagging.auto_tag_session(session_id, clients, session_settings=session_settings)
+    tag_count = len(tags)
+
+    audit = AuditService(db)
+    audit.log(
+        "retag_triggered", "session", session_id,
+        new_value={"tag_count": tag_count},
+        session_id=session_id,
+        is_auto=False
+    )
+    return {"success": True, "session_id": session_id, "tag_count": tag_count}
+
+
+@router.patch("/{transaction_id}", response_model=TransactionResponse)
+def patch_transaction(
+    transaction_id: int,
+    data: TransactionUpdate,
+    db: Session = Depends(get_db),
+):
+    """Patch editable fields on a transaction (party name override, description, notes)."""
+    service = SessionService(db)
+    tx = service.get_transaction(transaction_id)
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    old_values = {}
+    new_values = {}
+
+    provided_fields = data.model_fields_set
+
+    if "party_name" in provided_fields and data.party_name != tx.party_name:
+        old_values["party_name"] = tx.party_name
+        new_values["party_name"] = data.party_name
+        tx.party_name = data.party_name
+
+    if "description" in provided_fields and data.description != tx.description:
+        old_values["description"] = tx.description
+        new_values["description"] = data.description
+        tx.description = data.description
+
+    if "notes" in provided_fields and data.notes != tx.user_notes:
+        old_values["notes"] = tx.user_notes
+        new_values["notes"] = data.notes
+        tx.user_notes = data.notes
+
+    if new_values:
+        db.commit()
+        db.refresh(tx)
+        audit = AuditService(db)
+        audit.log(
+            "transaction_updated", "transaction", transaction_id,
+            old_value=old_values, new_value=new_values,
+            session_id=tx.session_id, is_auto=False,
+        )
+
+    return tx
+
+
+@router.post("/session/{session_id}/append")
+async def append_pdfs_to_session(
+    session_id: int,
+    pdf: List[UploadFile] = File(...),
+    password: Optional[str] = Form(None),
+    bank_name: Optional[str] = Form(None),
+    progress_id: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """Append additional PDFs to an existing session and re-tag new transactions."""
+    session_service = SessionService(db)
+    session = session_service.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session_service.mark_session_status(session_id, "active")
+    _set_parse_progress(progress_id, 1, "Preparing files…", "preparing")
+
+    pdf_passwords: dict = {}
+    if password:
+        try:
+            parsed = json.loads(password)
+            if isinstance(parsed, dict):
+                pdf_passwords = parsed
+                password = None
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+    def safe_save(upload_file: UploadFile, allowed_extensions: set) -> str:
+        safe_name = Path(upload_file.filename or "file").name
+        ext = Path(safe_name).suffix.lower()
+        if ext not in allowed_extensions:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext or 'unknown'}")
+        unique_name = f"{uuid.uuid4().hex}{ext}"
+        dest = os.path.join(UPLOAD_DIR, unique_name)
+        written = 0
+        with open(dest, "wb") as f:
+            while True:
+                chunk = upload_file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    f.close()
+                    try:
+                        os.remove(dest)
+                    except OSError:
+                        pass
+                    raise HTTPException(status_code=413, detail=f"File too large: {safe_name}")
+                f.write(chunk)
+        return os.path.abspath(dest)
+
+    # Load existing client list from session
+    csv_service = CSVService()
+    clients = []
+    if session.csv_path and os.path.exists(session.csv_path):
+        try:
+            clients = await run_in_threadpool(csv_service.parse_client_list, session.csv_path)
+        except Exception:
+            pass  # Continue without client list; broker/suspicious tagging still works
+
+    existing_count = session_service.get_transaction_count(session_id)
+
+    # Parse the new PDFs
+    pdf_service = PDFService()
+    all_new_transactions = []
+    new_pdf_paths: List[str] = []
+
+    for i, pdf_file in enumerate(pdf):
+        file_index = i + 1
+        pdf_path = safe_save(pdf_file, PDF_EXTENSIONS)
+        new_pdf_paths.append(pdf_path)
+        _set_parse_progress(
+            progress_id,
+            10 + int((i / max(len(pdf), 1)) * 60),
+            f"Parsing PDF {file_index} of {len(pdf)}: {pdf_file.filename}",
+            "parsing_pdf",
+            current_file=file_index,
+            total_files=len(pdf),
+        )
+
+        def report_pdf_progress(phase: str, done: int, total: int):
+            pass  # sub-progress suppressed for simplicity
+
+        txns = await run_in_threadpool(
+            pdf_service.parse_transactions,
+            pdf_path,
+            pdf_passwords.get(pdf_file.filename, password),
+            bank_name,
+            report_pdf_progress,
+        )
+        for tx in txns:
+            tx["pdf_filename"] = pdf_file.filename
+            tx["payment_method"] = detect_payment_method(tx.get("description"), tx.get("party_name"))
+        all_new_transactions.extend(txns)
+        _set_parse_progress(
+            progress_id,
+            10 + int((file_index / max(len(pdf), 1)) * 60),
+            f"Parsed PDF {file_index} of {len(pdf)} ({len(all_new_transactions)} new transactions).",
+            "parsing_pdf",
+        )
+
+    if not all_new_transactions:
+        session_service.mark_session_status(session_id, "completed")
+        _set_parse_progress(progress_id, 100, "No transactions found in the new PDFs.", "complete", session_id=session_id, transaction_count=0)
+        return {"session_id": session_id, "new_transaction_count": 0, "tag_count": 0}
+
+    _set_parse_progress(progress_id, 72, f"Saving {len(all_new_transactions)} new transactions…", "saving_transactions")
+
+    # Store settings snapshot from session (preserve original threshold etc.)
+    session_settings = session.settings_snapshot or {}
+    config = ConfigService(db)
+    effective_settings = {**config.get_all(), **session_settings}
+
+    new_transactions = session_service.add_transactions(session_id, all_new_transactions)
+
+    _set_parse_progress(progress_id, 80, "Tagging new transactions…", "tagging")
+
+    tagging = TaggingService(db)
+    new_tx_ids = [t.id for t in new_transactions]
+
+    def _tag_new_only():
+        return tagging.auto_tag_transactions(new_tx_ids, clients, session_settings=effective_settings)
+
+    tags = await run_in_threadpool(_tag_new_only)
+
+    # Persist appended PDF paths without mutating the user-visible session name.
+    try:
+        existing_paths = json.loads(session.pdf_path or "[]") if session.pdf_path else []
+        if not isinstance(existing_paths, list):
+            existing_paths = [existing_paths]
+    except (json.JSONDecodeError, TypeError):
+        existing_paths = [session.pdf_path] if session.pdf_path else []
+    session.pdf_path = json.dumps([p for p in [*existing_paths, *new_pdf_paths] if p])
+    db.commit()
+
+    audit = AuditService(db)
+    audit.log(
+        "session_created", "session", session_id,
+        old_value={"existing_transactions": existing_count},
+        new_value={"appended_transactions": len(new_transactions), "tag_count": len(tags)},
+        session_id=session_id, is_auto=False,
+    )
+    session_service.mark_session_status(session_id, "completed")
+
+    _set_parse_progress(
+        progress_id, 100,
+        f"Appended {len(new_transactions)} transactions, {len(tags)} tags applied.",
+        "complete",
+        session_id=session_id,
+        transaction_count=len(new_transactions),
+        tag_count=len(tags),
+    )
+
+    return {
+        "session_id": session_id,
+        "new_transaction_count": len(new_transactions),
+        "tag_count": len(tags),
+    }
