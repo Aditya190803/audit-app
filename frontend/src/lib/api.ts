@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { HealthResponse, AuditSession, Transaction, Tag, Broker, AuditLog, TagSummary, ParseProgress } from '../types/api'
+import type { HealthResponse, AuditSession, Transaction, Tag, Broker, AuditLog, TagSummary, ParseProgress, Alias } from '../types/api'
 
 let backendPort: number | null = null
 let backendToken: string | null = null
@@ -63,6 +63,11 @@ export async function getSession(id: number) {
   return client.get<AuditSession>(`/sessions/${id}`)
 }
 
+export async function getRecoverySession() {
+  const client = await getClient()
+  return client.get<{ found: boolean; session?: AuditSession }>('/sessions/recovery')
+}
+
 export async function deleteSession(id: number) {
   const client = await getClient()
   return client.delete(`/sessions/${id}`)
@@ -73,10 +78,13 @@ export async function renameSession(id: number, name: string) {
   return client.patch(`/sessions/${id}`, { name })
 }
 
+export const TRANSACTION_BATCH_SIZE = 5000
+export const TRANSACTION_WARN_THRESHOLD = 10000
+
 export async function getTransactions(sessionId: number) {
   const client = await getClient()
   const all: Transaction[] = []
-  const limit = 10000
+  const limit = TRANSACTION_BATCH_SIZE
   let offset = 0
 
   while (true) {
@@ -85,7 +93,7 @@ export async function getTransactions(sessionId: number) {
     })
     all.push(...response.data)
     if (response.data.length < limit) {
-      return { ...response, data: all }
+      return { ...response, data: all, totalCount: all.length }
     }
     offset += limit
   }
@@ -99,6 +107,19 @@ export async function updateReviewStatus(transactionId: number, status: 'unrevie
 export async function updateTransactionNotes(transactionId: number, notes: string) {
   const client = await getClient()
   return client.post(`/transactions/${transactionId}/notes`, { notes })
+}
+
+export async function bulkUpdateReviewStatus(
+  transactionIds: number[],
+  status: 'unreviewed' | 'reviewed' | 'needs_review' | 'flagged'
+) {
+  const client = await getClient()
+  return client.post('/transactions/bulk-review', { transaction_ids: transactionIds, status })
+}
+
+export async function retagSession(sessionId: number) {
+  const client = await getClient()
+  return client.post(`/transactions/session/${sessionId}/retag`)
 }
 
 export async function getParsers() {
@@ -226,4 +247,45 @@ export async function exportFile(sessionId: number, exportType: string, format: 
 export async function getAuditLogs(sessionId: number, limit?: number) {
   const client = await getClient()
   return client.get<AuditLog[]>(`/audit/session/${sessionId}`, { params: { limit } })
+}
+
+export async function patchTransaction(
+  transactionId: number,
+  data: { party_name?: string | null; description?: string | null; notes?: string | null }
+) {
+  const client = await getClient()
+  return client.patch<Transaction>(`/transactions/${transactionId}`, data)
+}
+
+export async function appendPdfsToSession(
+  sessionId: number,
+  pdfs: File[],
+  opts: { password?: string; bankName?: string; progressId?: string } = {}
+) {
+  const client = await getClient()
+  const form = new FormData()
+  for (const f of pdfs) form.append('pdf', f)
+  if (opts.password) form.append('password', opts.password)
+  if (opts.bankName) form.append('bank_name', opts.bankName)
+  if (opts.progressId) form.append('progress_id', opts.progressId)
+  return client.post<{ session_id: number; new_transaction_count: number; tag_count: number }>(
+    `/transactions/session/${sessionId}/append`,
+    form,
+    { headers: { 'Content-Type': 'multipart/form-data' } }
+  )
+}
+
+export async function listAliases() {
+  const client = await getClient()
+  return client.get<Alias[]>('/aliases/')
+}
+
+export async function createAlias(aliasName: string, canonicalName: string) {
+  const client = await getClient()
+  return client.post<Alias>('/aliases/', { alias_name: aliasName, canonical_name: canonicalName })
+}
+
+export async function deleteAlias(aliasId: number) {
+  const client = await getClient()
+  return client.delete(`/aliases/${aliasId}`)
 }

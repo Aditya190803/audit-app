@@ -8,7 +8,7 @@ type ContextPanelMode = 'review' | 'pdf'
 interface Toast {
   id: number
   message: string
-  type?: 'success' | 'info' | 'update'
+  type?: 'success' | 'info' | 'update' | 'error'
   persistent?: boolean
   action?: { label: string; onClick: () => void }
 }
@@ -29,6 +29,7 @@ interface UIState {
   advancedFilters: AdvancedFilters
   filtersExpanded: boolean
   toasts: Toast[]
+  activeTransactionId: number | null
   // Right panel state
   contextPanelOpen: boolean
   contextPanelMode: ContextPanelMode
@@ -43,6 +44,7 @@ interface UIState {
   goHome: () => void
   selectTransaction: (id: number, multi?: boolean) => void
   clearSelection: () => void
+  setActiveTransaction: (id: number | null) => void
   setSearchQuery: (q: string) => void
   setFilterTags: (tags: string[]) => void
   setResultFilter: (filter: ResultFilter) => void
@@ -72,6 +74,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   reviewView: 'dashboard',
   advancedFilters: DEFAULT_ADVANCED_FILTERS,
   filtersExpanded: false,
+  activeTransactionId: null,
   toasts: [],
   contextPanelOpen: true,
   contextPanelMode: 'review',
@@ -91,6 +94,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setShowNewAudit: (show) => set({ showNewAudit: show }),
   goHome: () => set({
     showNewAudit: false,
+    activeTransactionId: null,
     selectedTransactionIds: [],
     searchQuery: '',
     filterTags: [],
@@ -115,6 +119,7 @@ export const useUIStore = create<UIState>((set, get) => ({
     return { selectedTransactionIds: [id] }
   }),
   clearSelection: () => set({ selectedTransactionIds: [] }),
+  setActiveTransaction: (id) => set({ activeTransactionId: id }),
   setSearchQuery: (q) => set({ searchQuery: q }),
   setFilterTags: (tags) => set({ filterTags: tags }),
   setResultFilter: (filter) => set({ resultFilter: filter }),

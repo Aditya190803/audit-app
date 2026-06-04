@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { deleteSession as deleteSessionApi, getParseProgress, getSessions, getTagSummary, getTransactions, parseFiles } from '../lib/api'
+import { deleteSession as deleteSessionApi, getSessions, getTagSummary, getTransactions, parseFiles } from '../lib/api'
 import type { Transaction, AuditSession, TagSummary, ParseProgress } from '../types/api'
 
 interface SessionState {
@@ -86,16 +86,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`
 
-    let pollTimer: ReturnType<typeof setInterval> | null = null
-    const pollProgress = async () => {
-      try {
-        const progress = await getParseProgress(progressId)
-        set({ processingProgress: progress.data })
-      } catch (e) {
-        console.error('Failed to poll audit progress:', e)
-      }
-    }
-
     set({
       isProcessing: true,
       processingError: null,
@@ -106,18 +96,51 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         stage: 'queued'
       }
     })
-    pollTimer = setInterval(pollProgress, 750)
+
+    // --- SSE subscription (push instead of polling) ---
+    // Wrap in ref object so TS doesn't narrow to 'never' after async assignment
+    const sse = { source: null as EventSource | null }
+    const startSse = async () => {
+      try {
+        const { getBackendPort, getBackendConfig } = (window as any).electronAPI ?? {}
+        let port = 8765
+        let token = ''
+        if (getBackendConfig) {
+          const cfg = await getBackendConfig()
+          port = cfg.port
+          token = cfg.token
+        } else if (getBackendPort) {
+          port = await getBackendPort()
+        }
+        const url = `http://127.0.0.1:${port}/transactions/parse-progress/${progressId}/stream${token ? `?token=${token}` : ''}`
+        sse.source = new EventSource(url)
+        sse.source.onmessage = (e) => {
+          try {
+            const data = JSON.parse(e.data)
+            set({ processingProgress: data })
+          } catch {}
+        }
+        sse.source.onerror = () => {
+          // SSE error — fall back silently (final state will be set after parse resolves)
+          sse.source?.close()
+          sse.source = null
+        }
+      } catch {
+        // SSE not available (dev env without electron) — will rely on final state set below
+      }
+    }
+    startSse()
+
     try {
       const pdfArr = Array.isArray(pdfFiles) ? pdfFiles : [pdfFiles]
       const res = await parseFiles(pdfArr, clientList, threshold, { ...options, progressId })
       const sessionId = res.data.session_id
-      await pollProgress()
+      sse.source?.close()
       await get().loadSessions()
       const session = get().sessions.find((s) => s.id === sessionId)
       if (session) {
         get().setCurrentSession(session)
       }
-      if (pollTimer) clearInterval(pollTimer)
       set((state) => ({
         isProcessing: false,
         processingProgress: state.processingProgress
@@ -127,7 +150,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       return sessionId
     } catch (e: any) {
       console.error('Failed to process files:', e)
-      if (pollTimer) clearInterval(pollTimer)
+      sse.source?.close()
       const msg = e?.response?.data?.detail || e?.message || 'Processing failed. Check the PDF is valid and not encrypted.'
       set((state) => ({
         isProcessing: false,

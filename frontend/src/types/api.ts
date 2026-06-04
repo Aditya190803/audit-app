@@ -7,6 +7,8 @@ export interface Transaction {
   party_name: string | null
   raw_text: string | null
   page_number: number | null
+  payment_method: string | null
+  bounding_box_json: Record<string, unknown> | null
   tags: Tag[]
   created_at: string
   pdf_filename?: string | null
