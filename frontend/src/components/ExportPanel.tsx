@@ -1,6 +1,5 @@
 import React, { useRef, useState } from 'react'
 import { X, Download, FileSpreadsheet } from 'lucide-react'
-import type { ExportFormat, ExportType } from '../types/api'
 import { exportFile } from '../lib/api'
 import { useUIStore } from '../stores/uiStore'
 import { useFocusTrap } from '../hooks/useFocusTrap'
@@ -9,24 +8,9 @@ interface ExportPanelProps {
   isOpen: boolean
   onClose: () => void
   sessionId: number | null
-  selectedIds?: number[]
 }
 
-const EXPORT_FORMATS: { value: ExportFormat; label: string; icon: React.ReactNode }[] = [
-  { value: 'excel', label: 'Excel Workbook', icon: <FileSpreadsheet className="h-4 w-4" strokeWidth={1.5} /> }
-]
-
-const EXPORT_SCOPE_OPTIONS: { value: ExportType; label: string; description: string }[] = [
-  { value: 'all', label: 'All Transactions', description: 'Full audit workbook with all sheets' },
-  { value: 'client', label: 'Clients Only', description: 'Only client-tagged transactions' },
-  { value: 'broker', label: 'Brokers Only', description: 'Only broker-tagged transactions' },
-  { value: 'suspicious', label: 'Suspicious Only', description: 'Only suspicious-tagged transactions' },
-  { value: 'tagged', label: 'All Tagged', description: 'All transactions that have any tag' },
-]
-
-export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessionId, selectedIds = [] }) => {
-  const [selectedFormat, setSelectedFormat] = useState<ExportFormat>('excel')
-  const [exportScope, setExportScope] = useState<ExportType>('all')
+export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessionId }) => {
   const [isExporting, setIsExporting] = useState(false)
   const { pushToast } = useUIStore()
   const panelRef = useRef<HTMLDivElement>(null)
@@ -38,18 +22,13 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessi
     if (!sessionId) return
     setIsExporting(true)
     try {
-      const { showSaveDialog } = window.electronAPI
-      const defaultExt = 'xlsx'
-      const filters = [{ name: 'EXCEL', extensions: ['xlsx'] }]
-
-      const result = await showSaveDialog({
-        defaultPath: `audit_${exportScope}.${defaultExt}`,
-        filters
+      const result = await window.electronAPI.showSaveDialog({
+        defaultPath: 'audit_results.xlsx',
+        filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }],
       })
 
       if (!result.canceled && result.filePath) {
-        const idsToPass = selectedIds.length > 0 ? selectedIds : undefined
-        await exportFile(sessionId, exportScope, selectedFormat, result.filePath, idsToPass, result.exportPathToken)
+        await exportFile(sessionId, 'all', 'excel', result.filePath, undefined, result.exportPathToken)
         pushToast({ message: `Export complete: ${result.filePath.split(/[\\/]/).pop() || result.filePath}` })
         onClose()
       }
@@ -63,7 +42,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessi
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/20">
       <div
         ref={panelRef}
         tabIndex={-1}
@@ -82,52 +61,16 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessi
           </button>
         </div>
 
-        <div className="p-5 space-y-5">
-          {/* Export scope selector */}
-          <div>
-            <label className="block text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider mb-2">
-              Export Scope
-            </label>
-            <div className="space-y-1.5">
-              {EXPORT_SCOPE_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  onClick={() => setExportScope(opt.value)}
-                  className={`flex items-start gap-2 w-full px-3 py-2 text-left rounded-[var(--radius-md)] border transition-colors duration-150 ${
-                    exportScope === opt.value
-                      ? 'border-[var(--primary)] bg-[var(--primary-subtle)]'
-                      : 'border-[var(--border)] hover:border-[var(--border-strong)]'
-                  }`}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className={`text-sm font-medium ${exportScope === opt.value ? 'text-[var(--primary)]' : 'text-[var(--text-primary)]'}`}>
-                      {opt.label}
-                    </div>
-                    <div className="text-[11px] text-[var(--text-tertiary)] mt-0.5">{opt.description}</div>
-                  </div>
-                </button>
-              ))}
+        <div className="p-5">
+          <div className="flex gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg)] p-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--primary-bg)] text-[var(--primary)]">
+              <FileSpreadsheet className="h-5 w-5" strokeWidth={1.5} />
             </div>
-          </div>
-
-          {/* Format selector */}
-          <div>
-            <label className="block text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider mb-2">Format</label>
-            <div className="grid grid-cols-1 gap-1.5">
-              {EXPORT_FORMATS.map((fmt) => (
-                <button
-                  key={fmt.value}
-                  onClick={() => setSelectedFormat(fmt.value)}
-                  className={`flex items-center gap-2 px-3 py-2 text-sm rounded-[var(--radius-md)] border transition-colors duration-150 ${
-                    selectedFormat === fmt.value
-                      ? 'border-[var(--primary)] bg-[var(--primary-subtle)] text-[var(--primary)]'
-                      : 'border-[var(--border)] hover:border-[var(--border-strong)] text-[var(--text-primary)]'
-                  }`}
-                >
-                  {fmt.icon}
-                  {fmt.label}
-                </button>
-              ))}
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-[var(--text-primary)]">Single Excel workbook</p>
+              <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
+                Downloads one .xlsx file with separate sheets for Account Transactions, Client, Broker, Suspicious, and suspicious subcategories.
+              </p>
             </div>
           </div>
         </div>
@@ -142,7 +85,7 @@ export const ExportPanel: React.FC<ExportPanelProps> = ({ isOpen, onClose, sessi
             className="btn-primary flex items-center gap-1.5 text-xs"
           >
             <Download className="h-3.5 w-3.5" strokeWidth={2} />
-            {isExporting ? 'Exporting...' : `Export ${exportScope !== 'all' ? `(${exportScope})` : ''}`}
+            {isExporting ? 'Exporting...' : 'Download Excel'}
           </button>
         </div>
       </div>

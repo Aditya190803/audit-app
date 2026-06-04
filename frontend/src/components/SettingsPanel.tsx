@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { X, RotateCcw, Plus, Trash2, Save, RefreshCw, Download, Sun, Moon, Monitor } from 'lucide-react'
+import { X, RotateCcw, Plus, Trash2, Save, RefreshCw, Download } from 'lucide-react'
 import { useSettingsStore } from '../stores/settingsStore'
 import { listAliases, createAlias, deleteAlias } from '../lib/api'
 import type { Alias } from '../types/api'
@@ -21,9 +21,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
   const [keywords, setKeywords] = useState<string[]>([])
   const [appVersion, setAppVersion] = useState('')
   const [confirmReset, setConfirmReset] = useState(false)
-  const [theme, setThemeState] = useState<'light' | 'dark' | 'system'>(
-    () => (localStorage.getItem('audit-theme') as 'light' | 'dark' | 'system') || 'system'
-  )
   const [aliases, setAliasesState] = useState<Alias[]>([])
   const [newAliasName, setNewAliasName] = useState('')
   const [newCanonicalName, setNewCanonicalName] = useState('')
@@ -111,18 +108,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
   const threshold = (localSettings.suspicious_threshold as number) || 10000
   const fuzzyThreshold = (localSettings.fuzzy_match_threshold as number) || 0.75
 
-  const applyTheme = (t: 'light' | 'dark' | 'system') => {
-    localStorage.setItem('audit-theme', t)
-    setThemeState(t)
-    if (t === 'dark') {
-      document.documentElement.setAttribute('data-theme', 'dark')
-    } else if (t === 'light') {
-      document.documentElement.setAttribute('data-theme', 'light')
-    } else {
-      document.documentElement.removeAttribute('data-theme')
-    }
-  }
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
       <div
@@ -144,27 +129,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
         </div>
 
         <div className="flex-1 overflow-auto p-5 space-y-6">
-          {/* Theme */}
-          <div>
-            <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">Appearance</label>
-            <div className="flex gap-2">
-              {([['light', Sun, 'Light'], ['dark', Moon, 'Dark'], ['system', Monitor, 'System']] as const).map(([val, Icon, label]) => (
-                <button
-                  key={val}
-                  onClick={() => applyTheme(val)}
-                  className={`flex-1 flex flex-col items-center gap-1.5 py-2.5 px-3 rounded-[var(--radius-md)] border text-xs font-medium transition-colors duration-150 ${
-                    theme === val
-                      ? 'border-[var(--primary)] bg-[var(--primary-subtle)] text-[var(--primary)]'
-                      : 'border-[var(--border)] hover:border-[var(--border-strong)] text-[var(--text-secondary)]'
-                  }`}
-                >
-                  <Icon className="h-4 w-4" strokeWidth={1.5} />
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
           {/* Threshold */}
           <div>
             <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">

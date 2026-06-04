@@ -45,7 +45,7 @@ export function AppShell() {
     setShowNewAudit, goHome, setSearchQuery,
     setResultFilter, setAdvancedFilter,
     toggleFiltersExpanded, setReviewView, activeFilterCount,
-    pushToast, activeTransactionId, setActiveTransaction, selectedTransactionIds,
+    pushToast, activeTransactionId, setActiveTransaction,
   } = useUIStore()
 
   const settings = useSettingsStore((s) => s.settings)
@@ -300,7 +300,6 @@ export function AppShell() {
         isOpen={exportOpen}
         onClose={toggleExport}
         sessionId={currentSession?.id ?? null}
-        selectedIds={selectedTransactionIds}
       />
       {/* Transaction detail drawer */}
       <TransactionDrawer
