@@ -8,8 +8,6 @@ import {
   Zap,
   Table2,
   FileText,
-  ArrowRight,
-  CheckCircle2,
   Monitor,
   Apple,
   Lock,
@@ -25,8 +23,8 @@ import {
   ArrowUpRight,
   AlertTriangle,
   Layers,
-  MoreHorizontal,
 } from "lucide-react";
+import Link from "next/link";
 
 type Platform = "windows" | "mac" | "linux";
 
@@ -456,16 +454,15 @@ interface LandingPageProps {
 }
 
 export default function LandingPage({ initialVersion }: LandingPageProps) {
-  const [detectedOS, setDetectedOS] = useState<Platform>("windows");
+  const [detectedOS] = useState<Platform>(() => detectOS());
   const [showAllPlatforms, setShowAllPlatforms] = useState(false);
   const [appVersion, setAppVersion] = useState(initialVersion);
   const [platforms, setPlatforms] = useState(() => getPlatformInfo(initialVersion));
-  const heroRef = useInView(0.1);
-  const featuresRef = useInView();
-  const downloadRef = useInView();
+  const { ref: heroRefElement, inView: heroInView } = useInView(0.1);
+  const { ref: featuresRefElement, inView: featuresInView } = useInView();
+  const { ref: downloadRefElement, inView: downloadInView } = useInView();
 
   useEffect(() => {
-    setDetectedOS(detectOS());
 
     // Fetch the latest version manifest dynamically
     fetch("/releases/latest.yml")
@@ -493,14 +490,14 @@ export default function LandingPage({ initialVersion }: LandingPageProps) {
       {/* ── Nav ── */}
       <nav className="sticky top-0 z-40 border-b border-border bg-surface/90 backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-6">
-          <a href="/" className="flex items-center gap-2.5">
+          <Link href="/" className="flex items-center gap-2.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-md)] bg-primary">
               <FileSearch className="h-4 w-4 text-white" strokeWidth={2} />
             </div>
             <span className="text-sm font-semibold tracking-tight text-text-primary">
               Bank Audit App
             </span>
-          </a>
+          </Link>
           <div className="flex items-center gap-4">
             <a href="#features" className="hidden sm:inline text-[13px] text-text-tertiary hover:text-text-primary transition-colors cursor-pointer">
               Features
@@ -517,7 +514,7 @@ export default function LandingPage({ initialVersion }: LandingPageProps) {
       </nav>
 
       {/* ── Hero ── */}
-      <section ref={heroRef.ref} className="relative overflow-hidden">
+      <section ref={heroRefElement} className="relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-primary-bg/60 to-transparent" />
         <div
           className="pointer-events-none absolute inset-0 opacity-[0.025]"
@@ -532,7 +529,7 @@ export default function LandingPage({ initialVersion }: LandingPageProps) {
           {/* Copy — centered */}
           <div
             className={`stagger max-w-2xl mx-auto text-center transition-all duration-700 ${
-              heroRef.inView ? "opacity-100" : "opacity-0"
+              heroInView ? "opacity-100" : "opacity-0"
             }`}
           >
             <h1 className="text-3xl font-bold leading-[1.15] tracking-tight text-text-primary sm:text-[40px]">
@@ -589,7 +586,7 @@ export default function LandingPage({ initialVersion }: LandingPageProps) {
           {/* App Mockup — full width below copy */}
           <div
             className={`mt-12 transition-all duration-700 delay-200 ${
-              heroRef.inView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
+              heroInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
             }`}
           >
             <AppMockup />
@@ -598,11 +595,11 @@ export default function LandingPage({ initialVersion }: LandingPageProps) {
       </section>
 
       {/* ── Features ── */}
-      <section id="features" ref={featuresRef.ref} className="border-t border-border py-20 sm:py-24">
+      <section id="features" ref={featuresRefElement} className="border-t border-border py-20 sm:py-24">
         <div className="mx-auto max-w-5xl px-6">
           <div
             className={`max-w-md transition-all duration-500 ${
-              featuresRef.inView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+              featuresInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
             }`}
           >
             <h2 className="text-xl font-semibold tracking-tight text-text-primary sm:text-2xl">
@@ -618,10 +615,10 @@ export default function LandingPage({ initialVersion }: LandingPageProps) {
               <div
                 key={feature.title}
                 className={`group bg-surface p-6 transition-all duration-500 hover:bg-surface-hover ${
-                  featuresRef.inView ? "opacity-100" : "opacity-0"
+                  featuresInView ? "opacity-100" : "opacity-0"
                 }`}
                 style={{
-                  transitionDelay: featuresRef.inView ? `${i * 60}ms` : "0ms",
+                  transitionDelay: featuresInView ? `${i * 60}ms` : "0ms",
                 }}
               >
                 <div className="flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)] bg-primary-bg text-primary transition-colors duration-200 group-hover:bg-primary group-hover:text-white">
@@ -640,11 +637,11 @@ export default function LandingPage({ initialVersion }: LandingPageProps) {
       </section>
 
       {/* ── Download ── */}
-      <section id="download" ref={downloadRef.ref} className="border-t border-border py-20 sm:py-24 bg-surface-inset">
+      <section id="download" ref={downloadRefElement} className="border-t border-border py-20 sm:py-24 bg-surface-inset">
         <div className="mx-auto max-w-5xl px-6">
           <div
             className={`max-w-md mx-auto text-center transition-all duration-500 ${
-              downloadRef.inView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+              downloadInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
             }`}
           >
             <h2 className="text-xl font-semibold tracking-tight text-text-primary sm:text-2xl">
@@ -658,7 +655,7 @@ export default function LandingPage({ initialVersion }: LandingPageProps) {
           {/* Primary download */}
           <div
             className={`mt-10 mx-auto max-w-md transition-all duration-500 delay-100 ${
-              downloadRef.inView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+              downloadInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
             }`}
           >
             <div className="rounded-[var(--radius-lg)] border border-primary/20 bg-surface p-6 text-center shadow-sm">

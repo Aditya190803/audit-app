@@ -47,7 +47,7 @@ export async function GET(
 
     // 2. Find asset matching the requested filename
     const asset = assets.find(
-      (a: any) => a.name.toLowerCase() === file.toLowerCase()
+      (a: { name: string; id: number }) => a.name.toLowerCase() === file.toLowerCase()
     );
 
     if (!asset) {
@@ -113,9 +113,9 @@ export async function GET(
         },
       });
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { error: error.message || "Internal server error" },
+      { error: error instanceof Error ? error.message : "Internal server error" },
       { status: 500 }
     );
   }
