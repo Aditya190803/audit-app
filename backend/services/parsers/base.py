@@ -224,12 +224,14 @@ re.IGNORECASE,
     def _infer_signed_amount(cls, amount: float, description: Optional[str]) -> float:
         desc = cls._clean_text(description).upper()
         debit_markers = [
-            "/DR/", " UPI/DR/", " UPI/P2M/", " WDL ", "WDL TFR", "WITHDRAWAL",
+            "/DR/", " UPI/DR/", "NEFT DR", "RTGS DR", "IMPS DR", "NEFTDR", "RTGSDR", "IMPSDR",
+            " UPI/P2M/", " WDL ", "WDL TFR", "WITHDRAWAL",
             "BY DEBIT", "DEBIT", " TO TRANSFER", " CHG", "/CHG", "CHARGE",
             "/P2A/", "IMPS-OPM", "WITHDRAW",
         ]
         credit_markers = [
-            "/CR/", " UPI/CR/", " UPI/P2A/", " DEP ", "DEP TFR", "DEPOSIT",
+            "/CR/", " UPI/CR/", "NEFT CR", "RTGS CR", "IMPS CR", "NEFTCR", "RTGSCR", "IMPSCR",
+            " UPI/P2A/", " DEP ", "DEP TFR", "DEPOSIT",
             "BY TRANSFER", "CREDIT", "FROM TRANSFER", "/P2M/",
         ]
         if any(marker in desc for marker in debit_markers):

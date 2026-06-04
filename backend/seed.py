@@ -3,8 +3,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from backend.database import engine, SessionLocal
-from backend.models import Base, Broker, Config
+from backend.database import SessionLocal
+from backend.models import Broker, Config
 from backend.defaults import DEFAULT_CONFIGS
 
 # Old demo broker names that should be replaced
@@ -16,7 +16,6 @@ OLD_DEMO_BROKERS = {
 }
 
 def seed_database():
-    Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
         # Replace old demo broker_list with real list from brokers_list.py

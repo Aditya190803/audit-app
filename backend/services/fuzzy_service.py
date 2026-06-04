@@ -1,5 +1,6 @@
 from rapidfuzz import fuzz, process
 from typing import List, Dict, Any, Optional, Tuple
+from backend.defaults import DEFAULT_CONFIGS
 import re
 
 COMMON_WORDS = {
@@ -47,7 +48,7 @@ TRANSACTION_NOISE_TOKENS = {
 }
 
 class FuzzyService:
-    def __init__(self, threshold: float = 0.75):
+    def __init__(self, threshold: float = DEFAULT_CONFIGS["fuzzy_match_threshold"]):
         self.threshold = threshold
     
     def set_threshold(self, threshold: float):

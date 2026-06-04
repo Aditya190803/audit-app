@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from backend.models import AuditSession, Transaction, UndoRedoState
 from typing import Optional, Dict, Any, List
 import json
@@ -94,7 +94,12 @@ class SessionService:
         limit: Optional[int] = None,
         offset: int = 0,
     ) -> List[Transaction]:
-        query = self.db.query(Transaction).filter(Transaction.session_id == session_id)
+        query = (
+            self.db.query(Transaction)
+            .filter(Transaction.session_id == session_id)
+            .options(selectinload(Transaction.tags))
+            .order_by(Transaction.id)
+        )
         if offset:
             query = query.offset(offset)
         if limit is not None:
@@ -142,3 +147,11 @@ class SessionService:
             self.db.commit()
             self.db.refresh(tx)
         return tx
+
+    def get_transaction_count(self, session_id: int) -> int:
+        """Return total number of transactions in a session (no row load)."""
+        from sqlalchemy import func
+        result = self.db.query(func.count(Transaction.id)).filter(
+            Transaction.session_id == session_id
+        ).scalar()
+        return result or 0

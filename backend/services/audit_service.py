@@ -10,7 +10,8 @@ class AuditService:
             old_value: Optional[Dict[str, Any]] = None,
             new_value: Optional[Dict[str, Any]] = None,
             session_id: Optional[int] = None,
-            is_auto: bool = False):
+            is_auto: bool = False,
+            commit: bool = True):
         """Log an audit event."""
         log = AuditLog(
             session_id=session_id,
@@ -22,8 +23,11 @@ class AuditService:
             is_auto=is_auto
         )
         self.db.add(log)
-        self.db.commit()
-        self.db.refresh(log)
+        if commit:
+            self.db.commit()
+            self.db.refresh(log)
+        else:
+            self.db.flush()
         return log
     
     def get_logs_for_session(self, session_id: int, limit: int = 100) -> List[AuditLog]:

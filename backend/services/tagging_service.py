@@ -244,7 +244,81 @@ class TaggingService:
         ).all()
         
         return new_tags
-    
+
+    def auto_tag_transactions(
+        self,
+        transaction_ids: List[int],
+        clients: List[Dict[str, Any]],
+        session_settings: Dict[str, Any] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+    ) -> List[Tag]:
+        """Auto-tag a specific list of transactions (e.g., newly appended rows)."""
+        if not transaction_ids:
+            return []
+        transactions = self.db.query(Transaction).filter(
+            Transaction.id.in_(transaction_ids)
+        ).all()
+        if not transactions:
+            return []
+
+        # Delegate to the same core logic via auto_tag_session helper
+        # Re-use session_id from the first transaction
+        session_id = transactions[0].session_id
+
+        # Load brokers and aliases
+        brokers = self.db.query(Broker).filter(Broker.is_active == True).all()
+        broker_names = [b.name for b in brokers]
+        alias_to_canonical = {}
+        for b in brokers:
+            for alias in (b.aliases or []):
+                broker_names.append(alias)
+                alias_to_canonical[alias] = b.name
+
+        aliases = self.db.query(Alias).all()
+        alias_list = [{"alias_name": a.alias_name, "canonical_name": a.canonical_name} for a in aliases]
+
+        session_settings = session_settings or {}
+        exclusions = self.config.get("broker_exclusions") or []
+        suspicious_threshold = float(session_settings.get("suspicious_threshold", self.config.get_threshold()))
+        fuzzy_threshold = self.config.get_fuzzy_threshold()
+        recurring_window = int(self.config.get("recurring_days_window") or 30)
+        suspicious_keywords = self.config.get("suspicious_keywords") or []
+        common_words = self.config.get("broker_common_words") or []
+
+        phone_map = self._build_phone_map(clients)
+        recurring_map = self._detect_recurring(transactions, recurring_window)
+
+        tx_dicts = [
+            {"id": t.id, "party_name": t.party_name, "description": t.description, "amount": t.amount, "date": t.date}
+            for t in transactions
+        ]
+
+        from backend.services.tagging_worker import _process_transaction_batch
+        max_workers = 1  # Small batch — single worker is fine
+        all_tags_data = _process_transaction_batch(
+            tx_dicts, clients, phone_map, broker_names, alias_list, alias_to_canonical,
+            suspicious_threshold, fuzzy_threshold, exclusions, common_words, recurring_map, suspicious_keywords,
+        )
+
+        if all_tags_data:
+            from sqlalchemy import insert
+            self.db.query(Tag).filter(
+                Tag.transaction_id.in_(transaction_ids),
+                Tag.is_manual == False,
+            ).delete(synchronize_session=False)
+            self.db.flush()
+            self.db.execute(insert(Tag), [
+                {"transaction_id": td["transaction_id"], "tag_type": td["tag_type"],
+                 "confidence": td["confidence"], "reason": td["reason"],
+                 "source": "auto", "is_manual": False}
+                for td in all_tags_data
+            ])
+        self.db.commit()
+
+        return self.db.query(Tag).filter(
+            Tag.transaction_id.in_(transaction_ids), Tag.is_manual == False
+        ).all()
+
     def _detect_recurring(self, transactions: List[Transaction], window_days: int) -> Dict[int, str]:
         """Detect recurring transactions by amount and party within a date window."""
         recurring: Dict[int, str] = {}
