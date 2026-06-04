@@ -109,6 +109,12 @@ def _repair_unversioned_schema() -> None:
                 )
                 connection.execute(text(sql))
 
+        transaction_columns = {
+            col["name"] for col in inspector.get_columns("transactions")
+        } if inspector.has_table("transactions") else set()
+        if "review_status" in transaction_columns:
+            connection.execute(text('ALTER TABLE "transactions" DROP COLUMN "review_status"'))
+
         existing_indexes = {
             (table_name, index["name"])
             for table_name in inspector.get_table_names()

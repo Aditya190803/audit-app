@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Activity, User, Tag, FileText, Settings, RefreshCw, ChevronDown } from 'lucide-react'
+import { Activity, Tag, FileText, Settings, RefreshCw, ChevronDown } from 'lucide-react'
 import type { AuditLog } from '../types/api'
 import { getAuditLogs } from '../lib/api'
 
@@ -13,7 +13,6 @@ const ACTION_META: Record<string, { icon: React.ReactNode; color: string; label:
   tag_changed:           { icon: <Tag className="h-3 w-3" />,        color: 'text-[var(--warning)]',  label: 'Tag Changed' },
   transaction_updated:   { icon: <FileText className="h-3 w-3" />,   color: 'text-[var(--text-secondary)]', label: 'Transaction Updated' },
   notes_updated:         { icon: <FileText className="h-3 w-3" />,   color: 'text-[var(--text-secondary)]', label: 'Notes Updated' },
-  review_status_changed: { icon: <User className="h-3 w-3" />,       color: 'text-[var(--success)]',  label: 'Status Changed' },
   session_created:       { icon: <Activity className="h-3 w-3" />,   color: 'text-[var(--primary)]',  label: 'Session Created' },
   settings_changed:      { icon: <Settings className="h-3 w-3" />,   color: 'text-[var(--text-tertiary)]', label: 'Settings Changed' },
   retag_triggered:       { icon: <RefreshCw className="h-3 w-3" />,  color: 'text-[var(--warning)]',  label: 'Re-tagged' },
@@ -46,10 +45,6 @@ function diffSummary(log: AuditLog): string | null {
     const tag = log.new_value
     if (tag.category) parts.push(`category: ${tag.category}`)
     if (tag.confidence != null) parts.push(`conf: ${(Number(tag.confidence) * 100).toFixed(0)}%`)
-  } else if (log.action === 'review_status_changed') {
-    const oldStatus = (log.old_value as any)?.status || 'unreviewed'
-    const newStatus = (log.new_value as any)?.status || 'unreviewed'
-    return `${oldStatus} → ${newStatus}`
   } else if (log.action === 'notes_updated') {
     const text = (log.new_value as any)?.notes || ''
     return text.length > 40 ? text.slice(0, 40) + '…' : text
@@ -67,7 +62,7 @@ export const AuditLogPanel: React.FC<AuditLogPanelProps> = ({ sessionId }) => {
     if (!sessionId) return
     setLoading(true)
     getAuditLogs(sessionId, limit)
-      .then((res) => setLogs(res.data))
+      .then((res) => setLogs(res.data.filter((log) => log.action !== 'review_status_changed')))
       .catch(() => setLogs([]))
       .finally(() => setLoading(false))
   }, [sessionId, limit])
@@ -95,7 +90,7 @@ export const AuditLogPanel: React.FC<AuditLogPanelProps> = ({ sessionId }) => {
           onClick={() => {
             setLoading(true)
             getAuditLogs(sessionId, limit)
-              .then((res) => setLogs(res.data))
+              .then((res) => setLogs(res.data.filter((log) => log.action !== 'review_status_changed')))
               .catch(() => {})
               .finally(() => setLoading(false))
           }}

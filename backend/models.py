@@ -35,7 +35,6 @@ class Transaction(Base):
     bounding_box_json = Column(JSON, nullable=True)
     payment_method = Column(String, nullable=True)
     pdf_filename = Column(String, nullable=True)
-    review_status = Column(String, default="unreviewed")
     user_notes = Column(Text, nullable=True)
     exported_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utc_now)

@@ -7,7 +7,6 @@ export type SuspiciousSubcategory = 'recurring' | 'high_value' | 'other'
 export type TagSourceFilter = 'all' | 'manual' | 'auto'
 export type TagConfidenceFilter = 'all' | 'low' | 'high'
 export type ExceptionFilter = 'none' | 'untagged' | 'repeat' | 'high_value' | 'low_confidence' | 'missing_party' | 'cash' | 'same_day' | 'weekend' | 'round_amount'
-export type ReviewStatusFilter = 'all' | 'reviewed' | 'unreviewed' | 'needs_review' | 'flagged'
 export type ExportFilter = 'all' | 'exported' | 'not_exported'
 export type ClientActivityType = 'all' | 'both' | 'debit_only' | 'credit_only'
 
@@ -39,7 +38,6 @@ export interface AdvancedFilters {
   showRepeatClients: boolean
   showSuspiciousClients: boolean
   manySmallTx: boolean
-  reviewStatus: ReviewStatusFilter
   hasNotes: boolean
   exported: ExportFilter
 }
@@ -157,7 +155,6 @@ export const DEFAULT_ADVANCED_FILTERS: AdvancedFilters = {
   showRepeatClients: false,
   showSuspiciousClients: false,
   manySmallTx: false,
-  reviewStatus: 'all',
   hasNotes: false,
   exported: 'all',
 }
@@ -558,11 +555,6 @@ export function buildAuditAnalytics(
     if (filters.showSuspiciousClients && !tx.tags.some((t) => t.tag_type === 'suspicious')) return false
 
     if (filters.manySmallTx && !manySmallTxSet.has(partyKey)) return false
-
-    if (filters.reviewStatus === 'reviewed' && tx.review_status !== 'reviewed') return false
-    if (filters.reviewStatus === 'unreviewed' && tx.review_status === 'reviewed') return false
-    if (filters.reviewStatus === 'needs_review' && tx.review_status !== 'needs_review') return false
-    if (filters.reviewStatus === 'flagged' && tx.review_status !== 'flagged') return false
 
     if (filters.hasNotes && !tx.user_notes) return false
 

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useCallback } from 'react'
+import React, { useMemo, useRef } from 'react'
 import {
   useReactTable,
   getCoreRowModel,
@@ -12,8 +12,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   ArrowUpDown, ArrowUp, ArrowDown,
   CheckSquare, Square, MinusSquare,
-  Loader2, FileText,
-  Circle, CheckCircle2, AlertCircle, Flag,
+  Loader2, FileText, AlertCircle,
 } from 'lucide-react'
 import type { Transaction } from '../types/api'
 import type { AuditAnalytics } from '../utils/auditAnalytics'
@@ -22,33 +21,9 @@ import { useUIStore } from '../stores/uiStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { TagBadgeList } from './TagBadge'
-import { addTag, removeTag, updateReviewStatus, TRANSACTION_WARN_THRESHOLD } from '../lib/api'
+import { addTag, removeTag, TRANSACTION_WARN_THRESHOLD } from '../lib/api'
 
 const ROW_HEIGHT = 40
-
-type ReviewStatus = 'unreviewed' | 'reviewed' | 'needs_review' | 'flagged'
-
-const REVIEW_CYCLE: ReviewStatus[] = ['unreviewed', 'needs_review', 'reviewed', 'flagged']
-
-function ReviewStatusBadge({ status, onClick }: { status: ReviewStatus | null; onClick: (e: React.MouseEvent) => void }) {
-  const s = status || 'unreviewed'
-  const cfg: Record<ReviewStatus, { icon: React.ReactNode; label: string; cls: string }> = {
-    unreviewed: { icon: <Circle className="h-3 w-3" strokeWidth={2} />, label: 'Unreviewed', cls: 'text-[var(--text-tertiary)]' },
-    needs_review: { icon: <AlertCircle className="h-3 w-3" strokeWidth={2} />, label: 'Needs review', cls: 'text-[var(--warning)]' },
-    reviewed: { icon: <CheckCircle2 className="h-3 w-3" strokeWidth={2} />, label: 'Reviewed', cls: 'text-[var(--success)]' },
-    flagged: { icon: <Flag className="h-3 w-3" strokeWidth={2} />, label: 'Flagged', cls: 'text-[var(--danger)]' },
-  }
-  const { icon, label, cls } = cfg[s]
-  return (
-    <button
-      onClick={onClick}
-      title={`Status: ${label} — click to cycle`}
-      className={`flex items-center gap-1 p-0.5 rounded transition-opacity hover:opacity-70 ${cls}`}
-    >
-      {icon}
-    </button>
-  )
-}
 
 function money(v: number | null): string {
   if (v == null) return '–'
@@ -72,19 +47,6 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
 
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnSizing, setColumnSizing] = React.useState<Record<string, number>>({})
-
-  const handleReviewCycle = useCallback(async (tx: Transaction, e: React.MouseEvent) => {
-    e.stopPropagation()
-    const current = (tx.review_status || 'unreviewed') as ReviewStatus
-    const idx = REVIEW_CYCLE.indexOf(current)
-    const next = REVIEW_CYCLE[(idx + 1) % REVIEW_CYCLE.length]
-    try {
-      await updateReviewStatus(tx.id, next)
-      await refreshCurrentSession()
-    } catch {
-      pushToast({ message: 'Failed to update status', type: 'error' })
-    }
-  }, [refreshCurrentSession, pushToast])
 
   // Smart sorting: for suspicious view group by subcategory, for recurring sort by person then date
   const transactions = useMemo(() => {
@@ -252,22 +214,6 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
         enableResizing: true,
       },
       {
-        id: 'status',
-        header: 'Status',
-        accessorFn: (row) => row.review_status || 'unreviewed',
-        cell: ({ row }) => (
-          <ReviewStatusBadge
-            status={(row.original.review_status || 'unreviewed') as ReviewStatus}
-            onClick={(e) => handleReviewCycle(row.original, e)}
-          />
-        ),
-        size: 70,
-        minSize: 60,
-        maxSize: 90,
-        enableSorting: true,
-        enableResizing: false,
-      },
-      {
         id: 'reason',
         header: 'Reason',
         accessorFn: (row) => {
@@ -302,7 +248,7 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
         maxSize: 100,
       },
     ],
-    [selectedTransactionIds, selectTransaction, clearSelection, refreshCurrentSession, pushToast, handleReviewCycle]
+    [selectedTransactionIds, selectTransaction, clearSelection, refreshCurrentSession, pushToast]
   )
 
   const table = useReactTable({
@@ -328,13 +274,13 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
       if (column.id === 'reason') return `minmax(${size}px, 0.9fr)`
       return `${size}px`
     })
+    .join(' ')
   const tableGridStyle = {
     display: 'grid',
     gridTemplateColumns,
     width: '100%',
     minWidth: `${tableMinWidth}px`,
   }
-    .join(' ')
 
   const virtualizer = useVirtualizer({
     count: rows.length,

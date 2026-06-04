@@ -8,12 +8,6 @@ class TagType(str, Enum):
     BROKER = "broker"
     SUSPICIOUS = "suspicious"
 
-class ReviewStatus(str, Enum):
-    UNREVIEWED = "unreviewed"
-    REVIEWED = "reviewed"
-    NEEDS_REVIEW = "needs_review"
-    FLAGGED = "flagged"
-
 class AuditAction(str, Enum):
     TAG_ADDED = "tag_added"
     TAG_REMOVED = "tag_removed"
@@ -25,7 +19,6 @@ class AuditAction(str, Enum):
     SETTINGS_CHANGED = "settings_changed"
     SESSION_CREATED = "session_created"
     SESSION_DELETED = "session_deleted"
-    REVIEW_STATUS_CHANGED = "review_status_changed"
     NOTES_UPDATED = "notes_updated"
     RETAG_TRIGGERED = "retag_triggered"
     PARTY_NAME_UPDATED = "party_name_updated"
@@ -41,7 +34,6 @@ class TransactionBase(BaseModel):
     bounding_box_json: Optional[Dict[str, Any]] = None
     payment_method: Optional[str] = None
     pdf_filename: Optional[str] = None
-    review_status: Optional[ReviewStatus] = ReviewStatus.UNREVIEWED
     user_notes: Optional[str] = Field(default=None, max_length=2000)
     exported_at: Optional[datetime] = None
 
@@ -200,13 +192,6 @@ class FuzzyMatchRequest(BaseModel):
 class FuzzyMatchResponse(BaseModel):
     text: str
     matches: List[Dict[str, Any]]
-
-class ReviewStatusUpdate(BaseModel):
-    status: ReviewStatus
-
-class BulkReviewRequest(BaseModel):
-    transaction_ids: List[int]
-    status: ReviewStatus
 
 class TransactionNotesUpdate(BaseModel):
     notes: str = Field(..., max_length=2000)

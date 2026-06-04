@@ -63,7 +63,6 @@ class ExportService:
             "Payment Method",
             "Tags",
             "Tag Reasons",
-            "Review Status",
             "Notes",
             "PDF File",
             "Page",
@@ -108,7 +107,6 @@ class ExportService:
                 tx.payment_method,
                 ", ".join(tag_types),
                 "; ".join(reason for reason in tag_reasons if reason),
-                tx.review_status,
                 tx.user_notes,
                 tx.pdf_filename,
                 tx.page_number,
@@ -118,7 +116,7 @@ class ExportService:
                 cell = ws.cell(row=row, column=col, value=value)
                 if fill:
                     cell.fill = fill
-                cell.alignment = Alignment(vertical="top", wrap_text=col in {5, 9, 11})
+                cell.alignment = Alignment(vertical="top", wrap_text=col in {5, 9, 10})
                 cell.border = thin_border
 
         if not sorted_transactions:

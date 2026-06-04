@@ -99,22 +99,9 @@ export async function getTransactions(sessionId: number) {
   }
 }
 
-export async function updateReviewStatus(transactionId: number, status: 'unreviewed' | 'reviewed' | 'needs_review' | 'flagged') {
-  const client = await getClient()
-  return client.post(`/transactions/${transactionId}/review`, { status })
-}
-
 export async function updateTransactionNotes(transactionId: number, notes: string) {
   const client = await getClient()
   return client.post(`/transactions/${transactionId}/notes`, { notes })
-}
-
-export async function bulkUpdateReviewStatus(
-  transactionIds: number[],
-  status: 'unreviewed' | 'reviewed' | 'needs_review' | 'flagged'
-) {
-  const client = await getClient()
-  return client.post('/transactions/bulk-review', { transaction_ids: transactionIds, status })
 }
 
 export async function retagSession(sessionId: number) {

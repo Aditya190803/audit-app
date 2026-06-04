@@ -4,8 +4,6 @@ from sqlalchemy.orm import Session
 from typing import Dict, List, Optional
 from backend.database import get_db
 from backend.schemas import (
-    ReviewStatusUpdate,
-    BulkReviewRequest,
     TransactionNotesUpdate,
     TransactionUpdate,
     TransactionResponse,
@@ -362,28 +360,6 @@ def get_tag_summary(session_id: int, db: Session = Depends(get_db)):
     tagging = TaggingService(db)
     return tagging.get_tag_summary(session_id)
 
-@router.post("/{transaction_id}/review")
-def update_review_status(
-    transaction_id: int,
-    data: ReviewStatusUpdate,
-    db: Session = Depends(get_db)
-):
-    """Update review status: unreviewed, reviewed, needs_review, flagged"""
-    service = SessionService(db)
-    existing = service.get_transaction(transaction_id)
-    if not existing:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    old_status = existing.review_status
-    tx = service.update_transaction(transaction_id, review_status=data.status.value)
-    AuditService(db).log(
-        "review_status_changed", "transaction", transaction_id,
-        old_value={"status": old_status},
-        new_value={"status": data.status.value},
-        session_id=tx.session_id,
-        is_auto=False,
-    )
-    return {"success": True, "review_status": data.status.value}
-
 @router.post("/{transaction_id}/notes")
 def update_transaction_notes(
     transaction_id: int,
@@ -418,31 +394,6 @@ def mark_transaction_exported(
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return {"success": True, "exported_at": tx.exported_at}
-
-@router.post("/bulk-review")
-def bulk_update_review_status(
-    data: BulkReviewRequest,
-    db: Session = Depends(get_db)
-):
-    """Update review status for multiple transactions at once."""
-    service = SessionService(db)
-    audit = AuditService(db)
-    updated = 0
-    updated_by_session: dict[int, List[int]] = {}
-    for tx_id in data.transaction_ids:
-        tx = service.update_transaction(tx_id, review_status=data.status.value)
-        if tx:
-            updated += 1
-            updated_by_session.setdefault(tx.session_id, []).append(tx.id)
-    for log_session_id, tx_ids in updated_by_session.items():
-        audit.log(
-            "review_status_changed", "bulk_transaction",
-            old_value={"transaction_ids": tx_ids},
-            new_value={"status": data.status.value, "count": len(tx_ids)},
-            session_id=log_session_id,
-            is_auto=False
-        )
-    return {"updated_count": updated, "status": data.status.value}
 
 @router.post("/session/{session_id}/retag")
 def retag_session(

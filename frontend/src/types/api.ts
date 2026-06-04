@@ -12,7 +12,6 @@ export interface Transaction {
   tags: Tag[]
   created_at: string
   pdf_filename?: string | null
-  review_status?: string | null
   user_notes?: string | null
   exported_at?: string | null
 }

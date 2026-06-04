@@ -1,18 +1,8 @@
 import React, { useState } from 'react'
-import { CheckCircle2, AlertCircle, Flag, Circle, Tag, X, Loader2 } from 'lucide-react'
+import { Tag, X } from 'lucide-react'
 import { useUIStore } from '../stores/uiStore'
 import { useSessionStore } from '../stores/sessionStore'
-import { bulkUpdateReviewStatus } from '../lib/api'
 import { addTag } from '../lib/api'
-
-type ReviewStatus = 'unreviewed' | 'reviewed' | 'needs_review' | 'flagged'
-
-const STATUS_OPTIONS: { value: ReviewStatus; label: string; icon: React.ReactNode; cls: string }[] = [
-  { value: 'reviewed', label: 'Mark Reviewed', icon: <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={2} />, cls: 'text-[var(--success)]' },
-  { value: 'needs_review', label: 'Needs Review', icon: <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />, cls: 'text-[var(--warning)]' },
-  { value: 'flagged', label: 'Flag', icon: <Flag className="h-3.5 w-3.5" strokeWidth={2} />, cls: 'text-[var(--danger)]' },
-  { value: 'unreviewed', label: 'Clear Status', icon: <Circle className="h-3.5 w-3.5" strokeWidth={2} />, cls: 'text-[var(--text-tertiary)]' },
-]
 
 const TAG_OPTIONS: { value: 'client' | 'broker' | 'suspicious'; label: string; cls: string }[] = [
   { value: 'client', label: 'Client', cls: 'text-[var(--success)]' },
@@ -29,20 +19,6 @@ export const BulkActionBar: React.FC = () => {
   if (selectedTransactionIds.length === 0) return null
 
   const count = selectedTransactionIds.length
-
-  const handleBulkStatus = async (status: ReviewStatus) => {
-    setLoading(true)
-    try {
-      const res = await bulkUpdateReviewStatus(selectedTransactionIds, status)
-      await refreshCurrentSession()
-      pushToast({ message: `Updated ${res.data.updated_count} transactions to "${status.replace('_', ' ')}"` })
-      clearSelection()
-    } catch {
-      pushToast({ message: 'Bulk update failed', type: 'error' })
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const handleBulkTag = async (tagType: 'client' | 'broker' | 'suspicious') => {
     setLoading(true)
@@ -70,22 +46,6 @@ export const BulkActionBar: React.FC = () => {
         <span className="font-semibold text-[var(--text-secondary)] px-2">
           {count} selected
         </span>
-        <div className="w-px h-4 bg-[var(--border)]" />
-
-        {/* Status actions */}
-        {STATUS_OPTIONS.map((opt) => (
-          <button
-            key={opt.value}
-            onClick={() => handleBulkStatus(opt.value)}
-            disabled={loading}
-            title={opt.label}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full font-medium transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-50 ${opt.cls}`}
-          >
-            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : opt.icon}
-            <span className="hidden sm:inline">{opt.label}</span>
-          </button>
-        ))}
-
         <div className="w-px h-4 bg-[var(--border)]" />
 
         {/* Bulk tag button */}

@@ -1,45 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   X, Calendar, IndianRupee, FileText, Hash, Tag,
-  MessageSquare, CreditCard, CheckCircle2, AlertCircle,
-  Circle, Flag, ChevronRight, Edit3, Save, RotateCcw,
+  MessageSquare, CreditCard, Edit3, Save, RotateCcw,
   Layers,
 } from 'lucide-react'
 import type { Transaction } from '../types/api'
-import { updateTransactionNotes, updateReviewStatus, patchTransaction } from '../lib/api'
+import { updateTransactionNotes, patchTransaction } from '../lib/api'
 import { useSessionStore } from '../stores/sessionStore'
 import { useUIStore } from '../stores/uiStore'
-
-type ReviewStatus = 'unreviewed' | 'reviewed' | 'needs_review' | 'flagged'
-
-const REVIEW_CYCLE: ReviewStatus[] = ['unreviewed', 'needs_review', 'reviewed', 'flagged']
-
-const STATUS_CFG: Record<ReviewStatus, { label: string; icon: React.ReactNode; cls: string; bg: string }> = {
-  unreviewed: {
-    label: 'Unreviewed',
-    icon: <Circle className="h-3.5 w-3.5" strokeWidth={2} />,
-    cls: 'text-[var(--text-tertiary)]',
-    bg: 'bg-[var(--surface-inset)]',
-  },
-  needs_review: {
-    label: 'Needs Review',
-    icon: <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />,
-    cls: 'text-[var(--warning)]',
-    bg: 'bg-[var(--warning-bg,#fef3c7)]',
-  },
-  reviewed: {
-    label: 'Reviewed',
-    icon: <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={2} />,
-    cls: 'text-[var(--success)]',
-    bg: 'bg-[var(--success-bg)]',
-  },
-  flagged: {
-    label: 'Flagged',
-    icon: <Flag className="h-3.5 w-3.5" strokeWidth={2} />,
-    cls: 'text-[var(--danger)]',
-    bg: 'bg-[var(--danger-bg)]',
-  },
-}
 
 const TAG_COLORS: Record<string, string> = {
   client: 'bg-[var(--success-bg)] text-[var(--success)] border-[var(--success)]/20',
@@ -84,7 +52,6 @@ export const TransactionDrawer: React.FC<TransactionDrawerProps> = ({ transactio
   const [notes, setNotes] = useState('')
   const [editingNotes, setEditingNotes] = useState(false)
   const [savingNotes, setSavingNotes] = useState(false)
-  const [localStatus, setLocalStatus] = useState<ReviewStatus>('unreviewed')
   const [editingPartyName, setEditingPartyName] = useState(false)
   const [partyNameValue, setPartyNameValue] = useState('')
   const [savingPartyName, setSavingPartyName] = useState(false)
@@ -95,7 +62,6 @@ export const TransactionDrawer: React.FC<TransactionDrawerProps> = ({ transactio
     if (transaction) {
       setNotes(transaction.user_notes || '')
       setPartyNameValue(transaction.party_name || '')
-      setLocalStatus((transaction.review_status || 'unreviewed') as ReviewStatus)
       setEditingNotes(false)
       setEditingPartyName(false)
     }
@@ -148,23 +114,8 @@ export const TransactionDrawer: React.FC<TransactionDrawerProps> = ({ transactio
     }
   }, [transaction, partyNameValue, refreshCurrentSession, pushToast])
 
-  const handleCycleStatus = useCallback(async () => {
-    if (!transaction) return
-    const idx = REVIEW_CYCLE.indexOf(localStatus)
-    const next = REVIEW_CYCLE[(idx + 1) % REVIEW_CYCLE.length]
-    setLocalStatus(next)
-    try {
-      await updateReviewStatus(transaction.id, next)
-      await refreshCurrentSession()
-    } catch {
-      setLocalStatus(localStatus)
-      pushToast({ message: 'Failed to update status', type: 'error' })
-    }
-  }, [transaction, localStatus, refreshCurrentSession, pushToast])
-
   if (!transaction) return null
 
-  const statusCfg = STATUS_CFG[localStatus]
   const amountColor = (transaction.amount ?? 0) < 0
     ? 'text-[var(--danger)]'
     : (transaction.amount ?? 0) > 0
@@ -216,19 +167,6 @@ export const TransactionDrawer: React.FC<TransactionDrawerProps> = ({ transactio
               </>
             )}
           </div>
-        </div>
-
-        {/* Status badge + cycle button */}
-        <div className="px-5 py-3 border-b border-[var(--border)] shrink-0">
-          <button
-            onClick={handleCycleStatus}
-            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all duration-150 hover:opacity-80 ${statusCfg.cls} ${statusCfg.bg} border-current/20`}
-            title="Click to cycle review status"
-          >
-            {statusCfg.icon}
-            {statusCfg.label}
-            <ChevronRight className="h-3 w-3 opacity-60" strokeWidth={2} />
-          </button>
         </div>
 
         {/* Scrollable content */}
