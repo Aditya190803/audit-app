@@ -4,6 +4,11 @@ const path = require('path')
 const { REQUIRED_BACKEND_MODULES, resolvePythonBin } = require('./lib/python-env')
 
 const RESOURCES_DIR = path.join(__dirname, '..', 'resources', 'python-dist')
+const ADD_DATA_SEPARATOR = process.platform === 'win32' ? ';' : ':'
+
+function addDataArg(from, to) {
+  return `${from}${ADD_DATA_SEPARATOR}${to}`
+}
 
 function main() {
   console.log('[Build] Starting Python backend build...')
@@ -59,6 +64,10 @@ function main() {
     '--hidden-import', 'backend.api.routes.export',
     '--hidden-import', 'backend.api.routes.settings',
     '--hidden-import', 'backend.api.routes.audit',
+    '--hidden-import', 'backend.api.routes.aliases',
+    '--hidden-import', 'backend.migrations',
+    '--add-data', addDataArg(path.join(__dirname, '..', 'backend', 'alembic.ini'), 'backend'),
+    '--add-data', addDataArg(path.join(__dirname, '..', 'backend', 'alembic'), path.join('backend', 'alembic')),
     '--hidden-import', 'backend.services.config_service',
     '--hidden-import', 'backend.services.pdf_service',
     '--hidden-import', 'backend.services.csv_service',
