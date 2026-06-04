@@ -267,7 +267,7 @@ body {
   font-size: 14px;
   line-height: 1.5;
   color: var(--text-primary);
-  background: var(--bg);
+  background: var(--surface);
   overflow: hidden;
 }
 

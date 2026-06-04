@@ -192,7 +192,7 @@ export function AppShell() {
   }
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-[var(--bg)]">
+    <div className="h-screen flex flex-col overflow-hidden bg-[var(--surface)]">
       <div className="flex flex-1 min-h-0">
         {/* ── Sidebar ─────────────────────────────────────── */}
         <Sidebar
@@ -267,29 +267,25 @@ export function AppShell() {
                       />
                     </div>
                   )}
-                  <div className="flex-1 min-h-0 flex overflow-hidden">
-                    <DataTable
-                      analytics={resolvedAnalytics}
-                      isLoading={isLoading}
-                    />
-                  </div>
+                  <DataTable
+                    analytics={resolvedAnalytics}
+                    isLoading={isLoading}
+                  />
                 </>
               )}
 
               {hasSession && activeView === 'review' && (
-                <div className="flex-1 min-h-0 overflow-hidden">
-                  <AuditReviewPage
-                    analytics={resolvedAnalytics}
-                    activeTab={reviewView}
-                    suspiciousThreshold={suspiciousThreshold}
-                    onTabChange={setReviewView}
-                    onExceptionFilter={handleExceptionFilter}
-                  />
-                </div>
+                <AuditReviewPage
+                  analytics={resolvedAnalytics}
+                  activeTab={reviewView}
+                  suspiciousThreshold={suspiciousThreshold}
+                  onTabChange={setReviewView}
+                  onExceptionFilter={handleExceptionFilter}
+                />
               )}
 
               {hasSession && activeView === 'activity' && (
-                <div className="flex-1 min-h-0 overflow-y-auto bg-[var(--bg)]">
+                <div className="flex-1 min-h-0 overflow-y-auto bg-[var(--surface)]">
                   <AuditLogPanel sessionId={currentSession?.id ?? null} />
                 </div>
               )}

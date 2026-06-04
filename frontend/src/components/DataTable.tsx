@@ -319,10 +319,21 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
   })
 
   const { rows } = table.getRowModel()
-  const tableWidth = table.getTotalSize()
-  const gridTemplateColumns = table
-    .getVisibleLeafColumns()
-    .map((column) => `${column.getSize()}px`)
+  const visibleColumns = table.getVisibleLeafColumns()
+  const tableMinWidth = table.getTotalSize()
+  const gridTemplateColumns = visibleColumns
+    .map((column) => {
+      const size = column.getSize()
+      if (column.id === 'description') return `minmax(${size}px, 1.65fr)`
+      if (column.id === 'reason') return `minmax(${size}px, 0.9fr)`
+      return `${size}px`
+    })
+  const tableGridStyle = {
+    display: 'grid',
+    gridTemplateColumns,
+    width: '100%',
+    minWidth: `${tableMinWidth}px`,
+  }
     .join(' ')
 
   const virtualizer = useVirtualizer({
@@ -360,9 +371,9 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
   }
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-[var(--bg)]">
+    <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-[var(--surface)]">
       {/* Status bar */}
-      <div className="flex items-center justify-between px-4 py-1.5 bg-[var(--surface)] border-b border-[var(--border-subtle)] text-[11px] text-[var(--text-tertiary)] shrink-0">
+      <div className="flex items-center justify-between px-4 py-2 bg-[var(--surface)] border-b border-[var(--border)] text-[11px] text-[var(--text-tertiary)] shrink-0">
         <span>
           {transactions.length.toLocaleString()} transactions
           {selectedTransactionIds.length > 0 && (
@@ -392,7 +403,7 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
           <div
             key={headerGroup.id}
             className="items-center"
-            style={{ display: 'grid', gridTemplateColumns, width: `${tableWidth}px` }}
+            style={tableGridStyle}
           >
             {headerGroup.headers.map((header, headerIndex) => {
               const canSort = header.column.getCanSort()
@@ -402,7 +413,7 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
                 <div
                   key={header.id}
                   className="relative group min-w-0"
-                  style={{ gridColumn: headerIndex + 1, width: `${header.getSize()}px`, overflow: 'hidden', textAlign: 'left' }}
+                  style={{ gridColumn: headerIndex + 1, overflow: 'hidden', textAlign: 'left' }}
                 >
                   <div
                     className={`
@@ -451,7 +462,8 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
           style={{
             height: `${virtualizer.getTotalSize()}px`,
             position: 'relative',
-            width: `${tableWidth}px`,
+            width: '100%',
+            minWidth: `${tableMinWidth}px`,
           }}
         >
           {virtualizer.getVirtualItems().map((virtualRow) => {
@@ -475,7 +487,8 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
                   transform: `translateY(${virtualRow.start}px)`,
                   display: 'grid',
                   gridTemplateColumns,
-                  width: `${tableWidth}px`,
+                  width: '100%',
+                  minWidth: `${tableMinWidth}px`,
                 }}
                 onClick={(e) => {
                   if (e.metaKey || e.ctrlKey || e.shiftKey) {
@@ -489,7 +502,7 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
                   <div
                     key={cell.id}
                     className="px-3 overflow-hidden min-w-0"
-                    style={{ gridColumn: cellIndex + 1, width: `${cell.column.getSize()}px`, textAlign: 'left' }}
+                    style={{ gridColumn: cellIndex + 1, textAlign: 'left' }}
                   >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </div>
