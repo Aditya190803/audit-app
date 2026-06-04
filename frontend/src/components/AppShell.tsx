@@ -2,8 +2,8 @@ import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import {
   Plus, FileText, Search, Settings, Download,
   Trash2, MoreHorizontal, Clock, ArrowRight, PanelLeft,
-  Table2, BarChart3, AlertTriangle,
-  Edit3, Check, X, Loader2,
+  Table2, BarChart3, AlertTriangle, Activity,
+  Edit3, Check, X, Loader2, RotateCcw,
 } from 'lucide-react'
 import { useSessionStore } from '../stores/sessionStore'
 import { useUIStore } from '../stores/uiStore'
@@ -12,16 +12,20 @@ import { useAuditAnalyticsWorker } from '../hooks/useAuditAnalyticsWorker'
 import { EMPTY_AUDIT_ANALYTICS } from '../utils/auditAnalytics'
 import type { AdvancedFilters } from '../utils/auditAnalytics'
 import type { AuditSession } from '../types/api'
-import { deleteSession, renameSession } from '../lib/api'
+import { deleteSession, renameSession, retagSession, getRecoverySession, appendPdfsToSession } from '../lib/api'
 
 import { FileDropZone } from './FileDropZone'
 import { DataTable } from './DataTable'
 import { SearchFilters } from './SearchFilters'
 import { AuditReviewPage } from './AuditReviewPage'
+import { AuditLogPanel } from './AuditLogPanel'
 import { SettingsPanel } from './SettingsPanel'
 import { ExportPanel } from './ExportPanel'
 import { ToastContainer } from './Toast'
 import { KeyboardShortcuts } from './KeyboardShortcuts'
+import { ConfirmDialog } from './ConfirmDialog'
+import { TransactionDrawer } from './TransactionDrawer'
+import { BulkActionBar } from './BulkActionBar'
 
 /* ════════════════════════════════════════════════════════════════════════════
    APP SHELL — The main orchestrator
@@ -30,7 +34,7 @@ import { KeyboardShortcuts } from './KeyboardShortcuts'
 export function AppShell() {
   const {
     sessions, currentSession, transactions, isLoading,
-    loadSessions, setCurrentSession,
+    loadSessions, setCurrentSession, refreshCurrentSession,
   } = useSessionStore()
 
   const {
@@ -41,7 +45,7 @@ export function AppShell() {
     setShowNewAudit, goHome, setSearchQuery,
     setResultFilter, setAdvancedFilter,
     toggleFiltersExpanded, setReviewView, activeFilterCount,
-    pushToast,
+    pushToast, activeTransactionId, setActiveTransaction, selectedTransactionIds,
   } = useUIStore()
 
   const settings = useSettingsStore((s) => s.settings)
@@ -67,6 +71,28 @@ export function AppShell() {
 
   // Load sessions on mount
   useEffect(() => { loadSessions() }, [loadSessions])
+
+  // Crash recovery: on mount check for an in-progress session
+  useEffect(() => {
+    getRecoverySession().then((res) => {
+      if (res.data.found && res.data.session) {
+        const recovered = res.data.session
+        pushToast({
+          message: `Last session "${recovered.name || `Audit #${recovered.id}`}" may be incomplete.`,
+          type: 'info',
+          persistent: true,
+          action: {
+            label: 'Restore',
+            onClick: () => {
+              setCurrentSession(recovered)
+              setShowNewAudit(false)
+            },
+          },
+        })
+      }
+    }).catch(() => {/* silently ignore */})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (!window.electronAPI?.onBackendCrashed) return undefined
@@ -100,7 +126,8 @@ export function AppShell() {
   }, [pushToast])
 
   // Active view
-  const [activeView, setActiveView] = useState<'data' | 'review'>('data')
+  const [activeView, setActiveView] = useState<'data' | 'review' | 'activity'>('data')
+  const appendInputRef = useRef<HTMLInputElement>(null)
 
   // Handle exception filter from review page
   const handleExceptionFilter = useCallback((key: string, value: string) => {
@@ -135,6 +162,35 @@ export function AppShell() {
   const hasSession = currentSession !== null
   const showEmptyState = !hasSession && !showNewAudit
 
+  // Resolve active transaction for drawer
+  const activeTransaction = activeTransactionId != null
+    ? transactions.find((t) => t.id === activeTransactionId) ?? null
+    : null
+
+  // Re-tag handler
+  const handleRetag = useCallback(async () => {
+    if (!currentSession) return
+    try {
+      const res = await retagSession(currentSession.id)
+      await refreshCurrentSession()
+      pushToast({ message: `Re-tagged: ${res.data.tag_count} tags applied` })
+    } catch {
+      pushToast({ message: 'Re-tagging failed', type: 'error' })
+    }
+  }, [currentSession, pushToast, refreshCurrentSession])
+
+  const handleAppendPdfs = async (files: FileList | null) => {
+    if (!files || files.length === 0 || !currentSession) return
+    try {
+      pushToast({ message: 'Appending files...' })
+      await appendPdfsToSession(currentSession.id, Array.from(files))
+      await refreshCurrentSession()
+      pushToast({ message: 'Files appended successfully' })
+    } catch {
+      pushToast({ message: 'Failed to append files', type: 'error' })
+    }
+  }
+
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[var(--bg)]">
       <div className="flex flex-1 min-h-0">
@@ -154,17 +210,30 @@ export function AppShell() {
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
           {/* Top toolbar */}
           {hasSession && (
-            <Toolbar
-              session={currentSession!}
-              activeView={activeView}
-              onViewChange={setActiveView}
-              onExport={toggleExport}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              filterCount={activeFilterCount()}
-              onToggleFilters={toggleFiltersExpanded}
-              isComputing={isComputing}
-            />
+            <>
+              <Toolbar
+                session={currentSession!}
+                activeView={activeView}
+                onViewChange={setActiveView}
+                onExport={toggleExport}
+                onRetag={handleRetag}
+                onAppendPdfs={() => appendInputRef.current?.click()}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                filterCount={activeFilterCount()}
+                onToggleFilters={toggleFiltersExpanded}
+                isComputing={isComputing}
+              />
+              {/* Hidden file input for appending PDFs */}
+              <input
+                ref={appendInputRef}
+                type="file"
+                accept=".pdf"
+                multiple
+                className="hidden"
+                onChange={(e) => handleAppendPdfs(e.target.files)}
+              />
+            </>
           )}
 
           {/* Content */}
@@ -218,6 +287,12 @@ export function AppShell() {
                   />
                 </div>
               )}
+
+              {hasSession && activeView === 'activity' && (
+                <div className="flex-1 min-h-0 overflow-y-auto bg-[var(--bg)]">
+                  <AuditLogPanel sessionId={currentSession?.id ?? null} />
+                </div>
+              )}
             </div>
           </div>
         </main>
@@ -229,7 +304,15 @@ export function AppShell() {
         isOpen={exportOpen}
         onClose={toggleExport}
         sessionId={currentSession?.id ?? null}
+        selectedIds={selectedTransactionIds}
       />
+      {/* Transaction detail drawer */}
+      <TransactionDrawer
+        transaction={activeTransaction}
+        onClose={() => setActiveTransaction(null)}
+      />
+      {/* Bulk action floating bar */}
+      <BulkActionBar />
       <ToastContainer />
       <KeyboardShortcuts />
     </div>
@@ -263,6 +346,7 @@ function Sidebar({
   const [renaming, setRenaming] = useState<number | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [contextMenu, setContextMenu] = useState<{ id: number; x: number; y: number } | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
   const contextRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -290,10 +374,9 @@ function Sidebar({
   }
 
   const handleDelete = async (id: number) => {
-    if (confirm('Delete this audit session? This cannot be undone.')) {
-      await deleteSession(id)
-      await onLoadSessions()
-    }
+    await deleteSession(id)
+    await onLoadSessions()
+    setConfirmDeleteId(null)
     setContextMenu(null)
   }
 
@@ -405,6 +488,11 @@ function Sidebar({
                         <Clock className="h-2.5 w-2.5" strokeWidth={2} />
                         {new Date(session.updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
                       </span>
+                      {session.transaction_count != null && session.transaction_count > 0 && (
+                        <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
+                          {session.transaction_count.toLocaleString()} rows
+                        </span>
+                      )}
                     </div>
                   </>
                 )}
@@ -449,7 +537,10 @@ function Sidebar({
             Rename
           </button>
           <button
-            onClick={() => handleDelete(contextMenu.id)}
+            onClick={() => {
+              setConfirmDeleteId(contextMenu.id)
+              setContextMenu(null)
+            }}
             className="flex items-center gap-2.5 w-full px-3 py-2 text-xs text-[var(--danger)] hover:bg-[var(--danger-bg)] transition-colors"
           >
             <Trash2 className="h-3.5 w-3.5" strokeWidth={1.5} />
@@ -457,6 +548,17 @@ function Sidebar({
           </button>
         </div>
       )}
+
+      {/* Confirm delete dialog */}
+      <ConfirmDialog
+        isOpen={confirmDeleteId !== null}
+        title="Delete Audit Session"
+        message="This will permanently delete the session and all its transactions. This cannot be undone."
+        confirmLabel="Delete"
+        danger
+        onConfirm={() => confirmDeleteId !== null && handleDelete(confirmDeleteId)}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </div>
   )
 }
@@ -471,6 +573,8 @@ function Toolbar({
   activeView,
   onViewChange,
   onExport,
+  onRetag,
+  onAppendPdfs,
   searchQuery,
   onSearchChange,
   filterCount,
@@ -478,9 +582,11 @@ function Toolbar({
   isComputing,
 }: {
   session: AuditSession
-  activeView: 'data' | 'review'
-  onViewChange: (v: 'data' | 'review') => void
+  activeView: 'data' | 'review' | 'activity'
+  onViewChange: (v: 'data' | 'review' | 'activity') => void
   onExport: () => void
+  onRetag: () => void
+  onAppendPdfs: () => void
   searchQuery: string
   onSearchChange: (q: string) => void
   filterCount: number
@@ -502,6 +608,12 @@ function Toolbar({
           onClick={() => onViewChange('review')}
           icon={<BarChart3 className="h-3.5 w-3.5" strokeWidth={1.5} />}
           label="Review"
+        />
+        <ViewTab
+          active={activeView === 'activity'}
+          onClick={() => onViewChange('activity')}
+          icon={<Activity className="h-3.5 w-3.5" strokeWidth={1.5} />}
+          label="Activity"
         />
       </div>
 
@@ -556,6 +668,12 @@ function Toolbar({
 
       {/* Actions */}
       <div className="flex items-center gap-1">
+        <button onClick={onRetag} className="btn-icon p-2" title="Re-tag session">
+          <RotateCcw className="h-4 w-4" strokeWidth={1.5} />
+        </button>
+        <button onClick={onAppendPdfs} className="btn-icon p-2" title="Append more PDFs to this session">
+          <Plus className="h-4 w-4" strokeWidth={1.5} />
+        </button>
         <button onClick={onExport} className="btn-icon p-2" title="Export">
           <Download className="h-4 w-4" strokeWidth={1.5} />
         </button>

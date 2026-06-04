@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react'
+import React, { useMemo, useRef, useCallback } from 'react'
 import {
   useReactTable,
   getCoreRowModel,
@@ -13,6 +13,7 @@ import {
   ArrowUpDown, ArrowUp, ArrowDown,
   CheckSquare, Square, MinusSquare,
   Loader2, FileText,
+  Circle, CheckCircle2, AlertCircle, Flag,
 } from 'lucide-react'
 import type { Transaction } from '../types/api'
 import type { AuditAnalytics } from '../utils/auditAnalytics'
@@ -21,10 +22,33 @@ import { useUIStore } from '../stores/uiStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { TagBadgeList } from './TagBadge'
-import { addTag, removeTag } from '../lib/api'
+import { addTag, removeTag, updateReviewStatus, TRANSACTION_WARN_THRESHOLD } from '../lib/api'
 
 const ROW_HEIGHT = 40
-const MIN_COL_WIDTH = 40
+
+type ReviewStatus = 'unreviewed' | 'reviewed' | 'needs_review' | 'flagged'
+
+const REVIEW_CYCLE: ReviewStatus[] = ['unreviewed', 'needs_review', 'reviewed', 'flagged']
+
+function ReviewStatusBadge({ status, onClick }: { status: ReviewStatus | null; onClick: (e: React.MouseEvent) => void }) {
+  const s = status || 'unreviewed'
+  const cfg: Record<ReviewStatus, { icon: React.ReactNode; label: string; cls: string }> = {
+    unreviewed: { icon: <Circle className="h-3 w-3" strokeWidth={2} />, label: 'Unreviewed', cls: 'text-[var(--text-tertiary)]' },
+    needs_review: { icon: <AlertCircle className="h-3 w-3" strokeWidth={2} />, label: 'Needs review', cls: 'text-[var(--warning)]' },
+    reviewed: { icon: <CheckCircle2 className="h-3 w-3" strokeWidth={2} />, label: 'Reviewed', cls: 'text-[var(--success)]' },
+    flagged: { icon: <Flag className="h-3 w-3" strokeWidth={2} />, label: 'Flagged', cls: 'text-[var(--danger)]' },
+  }
+  const { icon, label, cls } = cfg[s]
+  return (
+    <button
+      onClick={onClick}
+      title={`Status: ${label} — click to cycle`}
+      className={`flex items-center gap-1 p-0.5 rounded transition-opacity hover:opacity-70 ${cls}`}
+    >
+      {icon}
+    </button>
+  )
+}
 
 function money(v: number | null): string {
   if (v == null) return '–'
@@ -42,12 +66,25 @@ interface DataTableProps {
 }
 
 export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) => {
-  const { selectedTransactionIds, selectTransaction, clearSelection, pushToast, resultFilter } = useUIStore()
+  const { selectedTransactionIds, selectTransaction, clearSelection, pushToast, resultFilter, setActiveTransaction } = useUIStore()
   const { refreshCurrentSession } = useSessionStore()
   const suspiciousThreshold = useSettingsStore((s) => (s.settings.suspicious_threshold as number) || 10000)
 
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnSizing, setColumnSizing] = React.useState<Record<string, number>>({})
+
+  const handleReviewCycle = useCallback(async (tx: Transaction, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const current = (tx.review_status || 'unreviewed') as ReviewStatus
+    const idx = REVIEW_CYCLE.indexOf(current)
+    const next = REVIEW_CYCLE[(idx + 1) % REVIEW_CYCLE.length]
+    try {
+      await updateReviewStatus(tx.id, next)
+      await refreshCurrentSession()
+    } catch {
+      pushToast({ message: 'Failed to update status', type: 'error' })
+    }
+  }, [refreshCurrentSession, pushToast])
 
   // Smart sorting: for suspicious view group by subcategory, for recurring sort by person then date
   const transactions = useMemo(() => {
@@ -133,11 +170,12 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
         enableResizing: false,
       },
       {
-        accessorKey: 'date',
+        id: 'date',
         header: 'Date',
+        accessorFn: (row) => cleanCellText(row.date),
         cell: ({ getValue }) => (
           <span className="text-[var(--text-secondary)] font-mono text-[12px] whitespace-nowrap">
-            {getValue() || '–'}
+            {cleanCellText(getValue() as string) || '–'}
           </span>
         ),
         size: 100,
@@ -199,8 +237,9 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
               const types = ['client', 'broker', 'suspicious'] as const
               const idx = types.indexOf(tag.tag_type)
               const next = types[(idx + 1) % types.length]
+              // Preserve original reason and confidence (Fix TD-10)
               await removeTag(tag.id)
-              await addTag(row.original.id, next, `Cycled from ${tag.tag_type}`, 1.0, 'manual', true)
+              await addTag(row.original.id, next, tag.reason || `Cycled from ${tag.tag_type}`, tag.confidence, 'manual', true)
               await refreshCurrentSession()
               pushToast({ message: `Tag changed to ${next}` })
             }}
@@ -211,6 +250,22 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
         maxSize: 200,
         enableSorting: false,
         enableResizing: true,
+      },
+      {
+        id: 'status',
+        header: 'Status',
+        accessorFn: (row) => row.review_status || 'unreviewed',
+        cell: ({ row }) => (
+          <ReviewStatusBadge
+            status={(row.original.review_status || 'unreviewed') as ReviewStatus}
+            onClick={(e) => handleReviewCycle(row.original, e)}
+          />
+        ),
+        size: 70,
+        minSize: 60,
+        maxSize: 90,
+        enableSorting: true,
+        enableResizing: false,
       },
       {
         id: 'reason',
@@ -247,7 +302,7 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
         maxSize: 100,
       },
     ],
-    [selectedTransactionIds, selectTransaction, clearSelection, refreshCurrentSession, pushToast]
+    [selectedTransactionIds, selectTransaction, clearSelection, refreshCurrentSession, pushToast, handleReviewCycle]
   )
 
   const table = useReactTable({
@@ -264,6 +319,11 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
   })
 
   const { rows } = table.getRowModel()
+  const tableWidth = table.getTotalSize()
+  const gridTemplateColumns = table
+    .getVisibleLeafColumns()
+    .map((column) => `${column.getSize()}px`)
+    .join(' ')
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -316,24 +376,33 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
         </span>
       </div>
 
+      {/* Pagination warning banner */}
+      {analytics.filteredTransactions.length >= TRANSACTION_WARN_THRESHOLD && (
+        <div className="flex items-center gap-2 px-4 py-1.5 bg-[var(--warning-bg)] border-b border-[var(--warning)]/20 text-[11px] text-[var(--warning)] shrink-0">
+          <AlertCircle className="h-3 w-3 shrink-0" strokeWidth={2} />
+          <span>
+            Large dataset ({analytics.filteredTransactions.length.toLocaleString()} rows). Use filters or search to narrow results for best performance.
+          </span>
+        </div>
+      )}
+
       {/* Table header */}
       <div className="shrink-0 bg-[var(--surface)] border-b border-[var(--border)]">
         {table.getHeaderGroups().map((headerGroup) => (
-          <div key={headerGroup.id} className="flex items-center w-full min-w-max">
-            {headerGroup.headers.map((header) => {
+          <div
+            key={headerGroup.id}
+            className="items-center"
+            style={{ display: 'grid', gridTemplateColumns, width: `${tableWidth}px` }}
+          >
+            {headerGroup.headers.map((header, headerIndex) => {
               const canSort = header.column.getCanSort()
               const sorted = header.column.getIsSorted()
               const canResize = header.column.getCanResize()
               return (
                 <div
                   key={header.id}
-                  className="relative group"
-                  style={{ 
-                    flexBasis: `${header.getSize()}px`,
-                    flexGrow: header.getSize(),
-                    flexShrink: 0,
-                    minWidth: header.column.columnDef.minSize ?? MIN_COL_WIDTH 
-                  }}
+                  className="relative group min-w-0"
+                  style={{ gridColumn: headerIndex + 1, width: `${header.getSize()}px`, overflow: 'hidden', textAlign: 'left' }}
                 >
                   <div
                     className={`
@@ -378,7 +447,13 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
 
       {/* Virtualized rows */}
       <div ref={parentRef} className="flex-1 min-h-0 overflow-auto">
-        <div style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
+        <div
+          style={{
+            height: `${virtualizer.getTotalSize()}px`,
+            position: 'relative',
+            width: `${tableWidth}px`,
+          }}
+        >
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const row = rows[virtualRow.index]
             const isSelected = selectedTransactionIds.includes(row.original.id)
@@ -387,7 +462,7 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
               <div
                 key={row.id}
                 className={`
-                  absolute left-0 w-full min-w-max flex items-center
+                  absolute left-0 items-center
                   border-b border-[var(--border-subtle)]
                   transition-colors duration-100 cursor-pointer
                   ${isSelected
@@ -398,19 +473,23 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
                 style={{
                   height: `${virtualRow.size}px`,
                   transform: `translateY(${virtualRow.start}px)`,
+                  display: 'grid',
+                  gridTemplateColumns,
+                  width: `${tableWidth}px`,
                 }}
-                onClick={() => selectTransaction(row.original.id)}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey) {
+                    selectTransaction(row.original.id, true)
+                  } else {
+                    setActiveTransaction(row.original.id)
+                  }
+                }}
               >
-                {row.getVisibleCells().map((cell) => (
+                {row.getVisibleCells().map((cell, cellIndex) => (
                   <div
                     key={cell.id}
-                    className="px-3 overflow-hidden"
-                    style={{
-                      flexBasis: `${cell.column.getSize()}px`,
-                      flexGrow: cell.column.getSize(),
-                      flexShrink: 0,
-                      minWidth: cell.column.columnDef.minSize ?? MIN_COL_WIDTH,
-                    }}
+                    className="px-3 overflow-hidden min-w-0"
+                    style={{ gridColumn: cellIndex + 1, width: `${cell.column.getSize()}px`, textAlign: 'left' }}
                   >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </div>

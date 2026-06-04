@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { X, RotateCcw, Plus, Trash2, Save, RefreshCw, Download } from 'lucide-react'
+import { X, RotateCcw, Plus, Trash2, Save, RefreshCw, Download, Sun, Moon, Monitor } from 'lucide-react'
 import { useSettingsStore } from '../stores/settingsStore'
+import { listAliases, createAlias, deleteAlias } from '../lib/api'
+import type { Alias } from '../types/api'
 import type { AppUpdateStatus } from '../types/electron'
 import { useFocusTrap } from '../hooks/useFocusTrap'
+import { ConfirmDialog } from './ConfirmDialog'
 
 interface SettingsPanelProps {
   isOpen: boolean
@@ -17,6 +20,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
   const [newKeyword, setNewKeyword] = useState('')
   const [keywords, setKeywords] = useState<string[]>([])
   const [appVersion, setAppVersion] = useState('')
+  const [confirmReset, setConfirmReset] = useState(false)
+  const [theme, setThemeState] = useState<'light' | 'dark' | 'system'>(
+    () => (localStorage.getItem('audit-theme') as 'light' | 'dark' | 'system') || 'system'
+  )
+  const [aliases, setAliasesState] = useState<Alias[]>([])
+  const [newAliasName, setNewAliasName] = useState('')
+  const [newCanonicalName, setNewCanonicalName] = useState('')
   const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus>({
     status: 'idle',
     message: 'Updates have not been checked yet.'
@@ -25,7 +35,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
   useFocusTrap(panelRef, isOpen, onClose)
 
   useEffect(() => {
-    if (isOpen) loadSettings()
+    if (isOpen) {
+      loadSettings()
+      listAliases().then((r) => setAliasesState(r.data)).catch(() => {})
+    }
   }, [isOpen, loadSettings])
 
   useEffect(() => {
@@ -62,10 +75,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
     onClose()
   }
 
-  const handleReset = async () => {
-    if (confirm('Reset all settings to defaults?')) {
-      await resetSettings()
-    }
+  const handleReset = () => {
+    setConfirmReset(true)
+  }
+
+  const doReset = async () => {
+    await resetSettings()
+    setConfirmReset(false)
   }
 
   const handleCheckUpdates = async () => {
@@ -95,6 +111,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
   const threshold = (localSettings.suspicious_threshold as number) || 10000
   const fuzzyThreshold = (localSettings.fuzzy_match_threshold as number) || 0.75
 
+  const applyTheme = (t: 'light' | 'dark' | 'system') => {
+    localStorage.setItem('audit-theme', t)
+    setThemeState(t)
+    if (t === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark')
+    } else if (t === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light')
+    } else {
+      document.documentElement.removeAttribute('data-theme')
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
       <div
@@ -116,6 +144,27 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
         </div>
 
         <div className="flex-1 overflow-auto p-5 space-y-6">
+          {/* Theme */}
+          <div>
+            <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">Appearance</label>
+            <div className="flex gap-2">
+              {([['light', Sun, 'Light'], ['dark', Moon, 'Dark'], ['system', Monitor, 'System']] as const).map(([val, Icon, label]) => (
+                <button
+                  key={val}
+                  onClick={() => applyTheme(val)}
+                  className={`flex-1 flex flex-col items-center gap-1.5 py-2.5 px-3 rounded-[var(--radius-md)] border text-xs font-medium transition-colors duration-150 ${
+                    theme === val
+                      ? 'border-[var(--primary)] bg-[var(--primary-subtle)] text-[var(--primary)]'
+                      : 'border-[var(--border)] hover:border-[var(--border-strong)] text-[var(--text-secondary)]'
+                  }`}
+                >
+                  <Icon className="h-4 w-4" strokeWidth={1.5} />
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Threshold */}
           <div>
             <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">
@@ -271,6 +320,67 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
               )}
             </div>
           </div>
+
+          {/* Alias Management */}
+          <div>
+            <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Alias Mappings</label>
+            <p className="text-[11px] text-[var(--text-tertiary)] mb-3">
+              Map alternative names to a canonical party name for consistent matching.
+            </p>
+            <div className="flex gap-2 mb-3">
+              <input
+                type="text"
+                value={newAliasName}
+                onChange={(e) => setNewAliasName(e.target.value)}
+                placeholder="Alias (e.g. Raj Investments)"
+                className="input-field flex-1 text-xs"
+              />
+              <span className="self-center text-[var(--text-tertiary)] text-xs shrink-0">→</span>
+              <input
+                type="text"
+                value={newCanonicalName}
+                onChange={(e) => setNewCanonicalName(e.target.value)}
+                placeholder="Canonical name"
+                className="input-field flex-1 text-xs"
+              />
+              <button
+                onClick={async () => {
+                  if (!newAliasName.trim() || !newCanonicalName.trim()) return
+                  try {
+                    const res = await createAlias(newAliasName.trim(), newCanonicalName.trim())
+                    setAliasesState((prev) => [...prev, res.data])
+                    setNewAliasName('')
+                    setNewCanonicalName('')
+                  } catch {}
+                }}
+                className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1"
+              >
+                <Plus className="h-3 w-3" strokeWidth={2} />
+              </button>
+            </div>
+            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+              {aliases.length === 0 ? (
+                <span className="text-xs text-[var(--text-tertiary)] py-1 block">No aliases configured.</span>
+              ) : (
+                aliases.map((a) => (
+                  <div key={a.id} className="flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)] bg-[var(--surface-inset)] border border-[var(--border-subtle)] text-xs">
+                    <span className="text-[var(--text-secondary)] truncate max-w-[40%]">{a.alias_name}</span>
+                    <span className="text-[var(--text-tertiary)] mx-2">→</span>
+                    <span className="text-[var(--text-primary)] font-medium truncate flex-1">{a.canonical_name}</span>
+                    <button
+                      onClick={async () => {
+                        await deleteAlias(a.id)
+                        setAliasesState((prev) => prev.filter((x) => x.id !== a.id))
+                      }}
+                      className="btn-icon p-1 text-[var(--text-tertiary)] hover:text-[var(--danger)] ml-2 shrink-0"
+                    >
+                      <Trash2 className="h-3 w-3" strokeWidth={2} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="flex justify-end gap-2 px-5 py-3 border-t border-[var(--border)]">
@@ -290,6 +400,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
           </button>
         </div>
       </div>
+
+      <ConfirmDialog
+        isOpen={confirmReset}
+        title="Reset All Settings"
+        message="This will reset all settings to their defaults. Your broker list and keywords will be cleared."
+        confirmLabel="Reset"
+        danger
+        onConfirm={doReset}
+        onCancel={() => setConfirmReset(false)}
+      />
     </div>
   )
 }

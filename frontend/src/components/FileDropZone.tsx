@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useDropzone, type DropzoneState } from 'react-dropzone'
 import { FileText, FileSpreadsheet, Lock, X, ArrowRight, ChevronDown, Search, Check, Building2 } from 'lucide-react'
-import * as XLSX from 'xlsx'
+import * as XLSX from 'xlsx-js-style'
 import { getParsers } from '../lib/api'
 import type { ParseProgress } from '../types/api'
 import { useSessionStore } from '../stores/sessionStore'
