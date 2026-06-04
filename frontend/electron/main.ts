@@ -110,10 +110,13 @@ function canonicalPath(filePath: string): string {
   return path.resolve(filePath)
 }
 
+const EXPORT_TOKEN_WINDOW_SECONDS = 60
+
 function exportPathToken(filePath: string): string {
+  const windowBucket = Math.floor(Date.now() / 1000 / EXPORT_TOKEN_WINDOW_SECONDS)
   return crypto
     .createHmac('sha256', exportPathSecret)
-    .update(canonicalPath(filePath))
+    .update(`${canonicalPath(filePath)}:${windowBucket}`)
     .digest('hex')
 }
 
