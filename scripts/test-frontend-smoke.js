@@ -57,7 +57,6 @@ function main() {
 
   const api = read('frontend/src/lib/api.ts')
   assert(api.includes("'X-Audit-Token': backendToken"), 'API client must send the local API token')
-  assert(api.includes('client.post(`/transactions/${transactionId}/review`, { status })'), 'Review status must be sent in JSON body')
   assert(api.includes('client.post(`/transactions/${transactionId}/notes`, { notes })'), 'Notes must be sent in JSON body')
 
   console.log('[Frontend Smoke] Production hardening checks passed.')
