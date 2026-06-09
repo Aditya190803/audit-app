@@ -360,6 +360,28 @@ def get_tag_summary(session_id: int, db: Session = Depends(get_db)):
     tagging = TaggingService(db)
     return tagging.get_tag_summary(session_id)
 
+@router.get("/session/{session_id}/client-names")
+def get_client_names(session_id: int, db: Session = Depends(get_db)):
+    """Return unique client names from the session's uploaded CSV."""
+    service = SessionService(db)
+    session = service.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    names: List[str] = []
+    if session.csv_path and os.path.exists(session.csv_path):
+        try:
+            csv_svc = CSVService()
+            clients = csv_svc.parse_client_list(session.csv_path)
+            seen = set()
+            for c in clients:
+                n = c.get("name", "").strip()
+                if n and n.lower() not in seen:
+                    seen.add(n.lower())
+                    names.append(n)
+        except Exception:
+            pass
+    return names
+
 @router.post("/{transaction_id}/notes")
 def update_transaction_notes(
     transaction_id: int,

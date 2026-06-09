@@ -163,6 +163,11 @@ export async function getTagSummary(sessionId: number) {
   return client.get<TagSummary>(`/transactions/session/${sessionId}/tags/summary`)
 }
 
+export async function getClientNames(sessionId: number) {
+  const client = await getClient()
+  return client.get<string[]>(`/transactions/session/${sessionId}/client-names`)
+}
+
 export async function getTags(transactionId: number) {
   const client = await getClient()
   return client.get<Tag[]>(`/tags/transaction/${transactionId}`)
