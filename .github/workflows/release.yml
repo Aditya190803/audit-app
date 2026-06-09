@@ -166,6 +166,7 @@ jobs:
       - name: Build platform installer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPDATE_FEED_URL: https://github.com/${{ github.repository }}/releases/download/${{ needs.validate.outputs.tag }}
         run: bunx electron-builder ${{ matrix.build-flag }} --publish never
 
       - name: Upload build artifacts
