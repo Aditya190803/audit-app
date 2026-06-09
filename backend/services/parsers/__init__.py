@@ -15,6 +15,13 @@ from backend.services.parsers.canara_bank import CanaraBankParser
 from backend.services.parsers.indusind_bank import IndusIndBankParser
 from backend.services.parsers.standard_chartered import StandardCharteredParser
 from backend.services.parsers.rbl_bank import RBLBankParser
+from backend.services.parsers.known_banks import (
+    FederalBankParser, IndianBankParser, IndianOverseasBankParser, UCOBankParser,
+    CentralBankParser, BankOfMaharashtraParser, KarnatakaBankParser,
+    SouthIndianBankParser, AUSmallFinanceBankParser, DCBBankParser,
+    BandhanBankParser, CityUnionBankParser, TamilnadMercantileBankParser,
+    EquitasBankParser, KarurVysyaBankParser,
+)
 from backend.services.parsers.generic import GenericParser
 
 
@@ -70,4 +77,19 @@ registry.register(CanaraBankParser)
 registry.register(IndusIndBankParser)
 registry.register(StandardCharteredParser)
 registry.register(RBLBankParser)
+registry.register(FederalBankParser)
+registry.register(IndianBankParser)
+registry.register(IndianOverseasBankParser)
+registry.register(UCOBankParser)
+registry.register(CentralBankParser)
+registry.register(BankOfMaharashtraParser)
+registry.register(KarnatakaBankParser)
+registry.register(SouthIndianBankParser)
+registry.register(AUSmallFinanceBankParser)
+registry.register(DCBBankParser)
+registry.register(BandhanBankParser)
+registry.register(CityUnionBankParser)
+registry.register(TamilnadMercantileBankParser)
+registry.register(EquitasBankParser)
+registry.register(KarurVysyaBankParser)
 registry.register(GenericParser)

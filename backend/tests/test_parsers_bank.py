@@ -26,6 +26,7 @@ from backend.services.parsers.canara_bank import CanaraBankParser
 from backend.services.parsers.indusind_bank import IndusIndBankParser
 from backend.services.parsers.standard_chartered import StandardCharteredParser
 from backend.services.parsers.rbl_bank import RBLBankParser
+from backend.services.parsers.known_banks import FederalBankParser, IndianOverseasBankParser
 from backend.services.parsers import registry
 from backend.brokers_list import BROKERS
 
@@ -69,6 +70,56 @@ class BankParserTests(unittest.TestCase):
         self.assertIn("indusind_bank", names)
         self.assertIn("standard_chartered", names)
         self.assertIn("rbl_bank", names)
+        self.assertIn("federal_bank", names)
+        self.assertIn("indian_overseas_bank", names)
+        self.assertIn("karur_vysya_bank", names)
+
+
+    def test_configurable_known_bank_detects_and_extracts_debit_credit(self):
+        parser = FederalBankParser()
+        tables = [{
+            "data": [["Date", "Transaction Details", "Reference", "Debit", "Credit", "Balance"],
+                     ["01/02/2025", "UPI/DR/123456789/RAMESH STORES/FDRL/ramesh@upi", "UTR1", "750.00", "", "9,250.00"]],
+            "page_number": 1,
+        }]
+        pages = [{"text": "Federal Bank Account Statement IFSC FDRL0001234"}]
+        self.assertGreater(parser.detect(tables, pages), 0.9)
+        txs = parser.parse(tables, pages)
+        self.assertEqual(len(txs), 1)
+        self.assertEqual(txs[0]["amount"], -750.0)
+        self.assertIn("RAMESH STORES", txs[0]["party_name"])
+
+
+    def test_configurable_known_bank_extracts_amount_type_layout(self):
+        parser = IndianOverseasBankParser()
+        tables = [{
+            "data": [["Txn Date", "Description", "Amount", "Dr/Cr", "Balance"],
+                     ["02-03-2025", "NEFT-N12345-ACME TRADERS-IOBA", "2,500.00", "CR", "12,500.00"]],
+            "page_number": 1,
+        }]
+        pages = [{"text": "Indian Overseas Bank statement IFSC IOBA0000123"}]
+        txs = parser.parse(tables, pages)
+        self.assertEqual(txs[0]["amount"], 2500.0)
+        self.assertIn("ACME TRADERS", txs[0]["party_name"])
+
+
+    def test_generic_amount_type_and_balance_delta_fallbacks(self):
+        generic = GenericParser()
+        amount_type = {"data": [["Date", "Narration", "Amount", "Type", "Balance"],
+                                  ["01/04/2025", "ATM WITHDRAWAL", "1,000.00", "DR", "9,000.00"]], "page_number": 1}
+        txs = generic._parse_amount_type_table(amount_type, re.compile(r"\d{1,2}/\d{1,2}/\d{4}"))
+        self.assertEqual(txs[0]["amount"], -1000.0)
+
+        balance_delta = {"data": [["Date", "Particulars", "Amount", "Balance"],
+                                    ["01/04/2025", "Opening credit", "10,000.00", "10,000.00"],
+                                    ["02/04/2025", "POS PURCHASE", "250.00", "9,750.00"]], "page_number": 1}
+        txs = generic._parse_balance_delta_table(
+            balance_delta,
+            re.compile(r"\d{1,2}/\d{1,2}/\d{4}"),
+            re.compile(r"^\(?-?[\d,]+\.\d{1,2}\)?$"),
+            re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$"),
+        )
+        self.assertEqual(txs[1]["amount"], -250.0)
 
 
     def test_bank_of_baroda_detects_table_with_identity(self):

@@ -189,6 +189,8 @@ re.IGNORECASE,
             candidate = cls._clean_party_candidate(candidate)
             if not candidate:
                 continue
+            if re.fullmatch(r"[A-Z]*\d+[A-Z]*", candidate, re.IGNORECASE):
+                continue
             if pattern.endswith("BRN[-/]PYMT[-/]CARD[-/]"):
                 return "Card Payment"
             if not cls._looks_like_bank_segment(candidate):
@@ -199,6 +201,8 @@ re.IGNORECASE,
         parts = [cls._clean_party_candidate(p) for p in re.split(r"[/|-]", desc)]
         for part in parts:
             if not part or cls._looks_like_bank_segment(part):
+                continue
+            if re.fullmatch(r"[A-Z]*\d+[A-Z]*", part, re.IGNORECASE):
                 continue
             if re.fullmatch(
                 r"\d+|[A-Z]{4}\d+|NA|UPI|DR|CR|NEFT|IMPS|MMT|BIL|ONL|P2A|P2M|MOB|"

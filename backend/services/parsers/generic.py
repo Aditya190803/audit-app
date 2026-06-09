@@ -10,17 +10,20 @@ class GenericParser(BaseParser):
     HEADER_PATTERNS = [
         r"date", r"withdrawal", r"deposit", r"debit", r"credit",
         r"balance", r"description", r"narration", r"particulars",
-        r"transaction", r"remarks", r"cheque", r"chq",
+        r"transaction", r"remarks", r"cheque", r"chq", r"ref", r"utr",
+        r"dr\s*/\s*cr", r"cr\s*/\s*dr", r"type", r"paid\s*(?:in|out)",
     ]
 
     COLUMN_KEYWORDS = {
-        "withdrawal": [r"withdrawal", r"debit", r"withdraw"],
-        "deposit": [r"deposit", r"credit"],
-        "balance": [r"balance"],
-        "date": [r"transaction\s*date", r"value\s*date", r"txn\s*date", r"date"],
-        "description": [r"transaction\s*remarks", r"particulars", r"narration",
-                        r"description", r"remarks", r"transaction"],
-        "cheque": [r"cheque", r"chq", r"ref\s*no"],
+        "withdrawal": [r"withdrawal", r"debit", r"withdraw", r"paid\s*out", r"dr\b"],
+        "deposit": [r"deposit", r"credit", r"paid\s*in", r"cr\b"],
+        "balance": [r"balance", r"closing\s*balance", r"available\s*balance"],
+        "date": [r"transaction\s*date", r"value\s*date", r"txn\s*date", r"tran\s*date", r"posting\s*date", r"date"],
+        "description": [r"transaction\s*remarks", r"transaction\s*details", r"particulars", r"narration",
+                        r"description", r"remarks", r"details", r"transaction"],
+        "cheque": [r"cheque", r"chq", r"ref\s*no", r"reference", r"utr", r"instrument"],
+        "amount": [r"transaction\s*amount", r"amount"],
+        "type": [r"dr\s*/\s*cr", r"cr\s*/\s*dr", r"debit\s*/\s*credit", r"type"],
     }
 
     def detect(self, tables: List[Dict], pages: List[Dict]) -> float:
@@ -42,6 +45,10 @@ class GenericParser(BaseParser):
 
             for table in tables:
                 txns = self._parse_table(table, date_pattern, amount_pattern, value_date_pattern)
+                if not txns:
+                    txns = self._parse_amount_type_table(table, date_pattern)
+                if not txns:
+                    txns = self._parse_balance_delta_table(table, date_pattern, amount_pattern, value_date_pattern)
                 transactions.extend(txns)
 
         if not transactions:
@@ -155,6 +162,75 @@ class GenericParser(BaseParser):
                 "raw_text": " | ".join(str(c or "") for c in row),
             }
         return None
+
+    def _parse_amount_type_table(self, table, date_pattern):
+        data = table["data"]
+        if not data:
+            return []
+        header_idx = self._find_header_row(data, self.HEADER_PATTERNS)
+        col_indices = self._detect_column_indices(data[header_idx], self.COLUMN_KEYWORDS)
+        if not {"date", "description", "amount"}.issubset(col_indices):
+            return []
+        transactions = []
+        for row in data[header_idx + 1:]:
+            date = self._date_from_cell(self._safe_cell(row, col_indices["date"]), date_pattern)
+            amount = self._parse_amount_cell(self._safe_cell(row, col_indices["amount"]))
+            if not date or amount is None:
+                continue
+            desc = self._clean_text(self._safe_cell(row, col_indices["description"]))
+            type_text = self._clean_text(self._safe_cell(row, col_indices.get("type", -1))).upper()
+            marker_source = f"{type_text} {desc}"
+            if re.search(r"\b(?:DR|DEBIT|WITHDRAWAL|WDL|PAID OUT)\b", marker_source):
+                amount = -abs(amount)
+            elif re.search(r"\b(?:CR|CREDIT|DEPOSIT|PAID IN)\b", marker_source):
+                amount = abs(amount)
+            else:
+                amount = self._infer_signed_amount(amount, desc)
+            transactions.append({
+                "date": date,
+                "amount": amount,
+                "description": desc,
+                "party_name": self._extract_party_from_description(desc) or desc,
+                "raw_text": " | ".join(str(c or "") for c in row),
+                "page_number": table["page_number"],
+            })
+        return transactions
+
+    def _parse_balance_delta_table(self, table, date_pattern, amount_pattern, value_date_pattern):
+        data = table["data"]
+        if not data:
+            return []
+        parsed = []
+        header_idx = self._find_header_row(data, self.HEADER_PATTERNS)
+        col_indices = self._detect_column_indices(data[header_idx], self.COLUMN_KEYWORDS)
+        for row in data[header_idx + 1:]:
+            tx = self._parse_table_row(row, amount_pattern, date_pattern, value_date_pattern)
+            if not tx:
+                continue
+            if "amount" in col_indices:
+                indexed_amount = self._parse_amount_cell(self._safe_cell(row, col_indices["amount"]))
+                if indexed_amount is not None:
+                    tx["amount"] = indexed_amount
+            balance = self._parse_amount_cell(self._safe_cell(row, col_indices.get("balance", -1))) if "balance" in col_indices else None
+            if balance is None:
+                for cell in reversed(row):
+                    val = self._parse_amount_cell(cell)
+                    if val is not None and abs(val) != abs(tx["amount"]):
+                        balance = abs(val)
+                        break
+            tx["_balance"] = abs(balance) if balance is not None else None
+            tx["page_number"] = table["page_number"]
+            parsed.append(tx)
+        for i in range(1, len(parsed)):
+            prev = parsed[i - 1].get("_balance")
+            cur = parsed[i].get("_balance")
+            if prev is not None and cur is not None:
+                delta = round(cur - prev, 2)
+                if abs(abs(delta) - abs(parsed[i]["amount"])) < 0.02:
+                    parsed[i]["amount"] = delta
+        for tx in parsed:
+            tx.pop("_balance", None)
+        return parsed
 
     def _parse_from_text(self, pages: List[Dict]) -> List[Dict[str, Any]]:
         transactions = []
