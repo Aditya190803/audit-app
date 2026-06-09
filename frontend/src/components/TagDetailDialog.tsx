@@ -218,6 +218,7 @@ export const TagDetailDialog: React.FC = () => {
   const request = useUIStore((s) => s.tagDetailRequest)
   const resolveTagDetail = useUIStore((s) => s.resolveTagDetail)
   const settings = useSettingsStore((s) => s.settings)
+  const loadSettings = useSettingsStore((s) => s.loadSettings)
   const currentSession = useSessionStore((s) => s.currentSession)
 
   const panelRef = useRef<HTMLDivElement>(null)
@@ -225,6 +226,11 @@ export const TagDetailDialog: React.FC = () => {
   const [detail, setDetail] = useState('')
   const [clientNames, setClientNames] = useState<string[]>([])
   const [clientNamesLoading, setClientNamesLoading] = useState(false)
+
+  // Ensure settings are loaded when the dialog opens
+  useEffect(() => {
+    if (request) loadSettings()
+  }, [request, loadSettings])
 
   // Load client names when dialog opens or session changes
   useEffect(() => {
@@ -253,13 +259,7 @@ export const TagDetailDialog: React.FC = () => {
   const close = useMemo(() => () => resolveTagDetail(null), [resolveTagDetail])
   useFocusTrap(panelRef, Boolean(request), close)
 
-  if (!request) return null
-
-  const meta = TAG_META[selectedType]
-  const scopeText = request.scope === 'bulk' ? 'these transactions' : 'this transaction'
-  const canChooseType = request.tagType == null
-
-  // Compute options for the current tag type
+  // Compute options for the current tag type (must be before early return — hooks can't be conditional)
   const dropdownOptions: string[] = useMemo(() => {
     if (selectedType === 'client') {
       return clientNames
@@ -270,6 +270,12 @@ export const TagDetailDialog: React.FC = () => {
     // suspicious
     return SUSPICIOUS_REASONS
   }, [selectedType, clientNames, settings.broker_list])
+
+  if (!request) return null
+
+  const meta = TAG_META[selectedType]
+  const scopeText = request.scope === 'bulk' ? 'these transactions' : 'this transaction'
+  const canChooseType = request.tagType == null
 
   const submit = () => {
     const trimmed = detail.trim()
