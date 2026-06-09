@@ -46,6 +46,8 @@ function main() {
   assert(main.includes("proc.kill('SIGKILL')"), 'Backend shutdown must force-kill a stuck process')
   assert(main.includes('AUDIT_API_TOKEN'), 'Backend must receive a per-launch API token')
   assert(main.includes('AUDIT_DISABLE_DOCS'), 'Packaged backend docs must be disabled')
+  assert(main.includes('validatedExternalUrl'), 'Packaged external update/license URLs must be validated')
+  assert(main.includes("url.protocol !== 'https:'"), 'Packaged external URLs must require HTTPS')
 
   const preload = read('frontend/electron/preload.ts')
   assert(preload.includes('contextBridge.exposeInMainWorld'), 'Preload must expose a narrow bridge')

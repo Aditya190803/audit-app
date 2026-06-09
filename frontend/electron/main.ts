@@ -38,8 +38,10 @@ type UpdateStatus = {
   percent?: number
 }
 
-const UPDATE_FEED_URL = process.env.UPDATE_FEED_URL || 'https://the-ska-auditing-app.vercel.app/releases'
-const LICENSE_CHECK_URL = process.env.LICENSE_CHECK_URL || 'https://the-ska-auditing-app.vercel.app/api/license'
+const DEFAULT_UPDATE_FEED_URL = 'https://the-ska-auditing-app.vercel.app/releases'
+const DEFAULT_LICENSE_CHECK_URL = 'https://the-ska-auditing-app.vercel.app/api/license'
+const UPDATE_FEED_URL = validatedExternalUrl('UPDATE_FEED_URL', process.env.UPDATE_FEED_URL, DEFAULT_UPDATE_FEED_URL)
+const LICENSE_CHECK_URL = validatedExternalUrl('LICENSE_CHECK_URL', process.env.LICENSE_CHECK_URL, DEFAULT_LICENSE_CHECK_URL)
 
 type BackendCrashPayload = {
   code: number | null
@@ -50,6 +52,22 @@ process.env.APP_ROOT = APP_ROOT
 
 autoUpdater.autoDownload = true
 autoUpdater.autoInstallOnAppQuit = true
+
+function validatedExternalUrl(name: string, configured: string | undefined, fallback: string): string {
+  const value = configured || fallback
+  try {
+    const url = new URL(value)
+    const isLocal = ['localhost', '127.0.0.1', '0.0.0.0'].includes(url.hostname)
+    if (app.isPackaged && (url.protocol !== 'https:' || isLocal)) {
+      console.warn(`[Main] Ignoring insecure packaged ${name}: ${value}`)
+      return fallback
+    }
+    return value
+  } catch {
+    console.warn(`[Main] Ignoring invalid ${name}: ${value}`)
+    return fallback
+  }
+}
 
 function publishUpdateStatus(next: UpdateStatus): UpdateStatus {
   updateStatus = next

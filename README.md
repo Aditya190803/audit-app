@@ -95,8 +95,11 @@ Deployed on **Vercel**. After building a new release, copy `latest.yml` to `site
 ```bash
 bun run build          # Frontend only
 bun run build:python   # Python backend (PyInstaller)
-bun run dist:win       # Full Windows installer
+bun run release:check  # Validate public release env/signing/artifact hygiene
+bun run dist:win       # Full signed Windows installer
 ```
+
+For public release signing, update hosting, and data-handling requirements, see [`docs/PRODUCTION_RELEASE.md`](docs/PRODUCTION_RELEASE.md).
 
 ## Scripts
 

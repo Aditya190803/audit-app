@@ -36,6 +36,7 @@ venv/
 ENV/
 build/*
 !build/icon.png
+!build/entitlements.mac.plist
 develop-eggs/
 dist/
 downloads/
@@ -67,8 +68,9 @@ resources/tesseract/
 # OS
 Thumbs.db
 
-# Uploads
+# Uploads and exports
 uploads/
+exports/
 backend.spec
 
 # Local/sensitive example inputs

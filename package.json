@@ -3,7 +3,7 @@
   "version": "1.0.3",
   "description": "Bank Statement Auditing App",
   "main": "./out/main/main.js",
-  "author": "",
+  "author": "SKA Auditing",
   "license": "MIT",
   "private": true,
   "scripts": {
@@ -11,10 +11,11 @@
     "build": "electron-vite build",
     "build:python": "node scripts/build-python.js",
     "preview": "electron-vite preview",
-    "dist": "bun run verify:prod && electron-builder",
-    "dist:win": "bun run verify:prod && electron-builder --win",
-    "dist:mac": "bun run verify:prod && electron-builder --mac",
-    "dist:linux": "bun run verify:prod && electron-builder --linux",
+    "release:check": "node scripts/check-release-readiness.js",
+    "dist": "bun run release:check && bun run verify:prod && electron-builder",
+    "dist:win": "RELEASE_PLATFORM=windows bun run release:check && bun run verify:prod && electron-builder --win",
+    "dist:mac": "RELEASE_PLATFORM=mac bun run release:check && bun run verify:prod && electron-builder --mac",
+    "dist:linux": "RELEASE_PLATFORM=linux bun run release:check && bun run verify:prod && electron-builder --linux",
     "postinstall": "electron-builder install-app-deps",
     "typecheck": "tsc --noEmit",
     "typecheck:watch": "tsc --noEmit --watch",
@@ -83,12 +84,21 @@
         "to": "tesseract"
       }
     ],
+    "publish": {
+      "provider": "generic",
+      "url": "${env.UPDATE_FEED_URL}"
+    },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "publisherName": "SKA Auditing"
     },
     "mac": {
       "target": "dmg",
-      "category": "public.app-category.finance"
+      "category": "public.app-category.finance",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "linux": {
       "target": "AppImage",
