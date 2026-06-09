@@ -21,11 +21,13 @@ import time
 import uuid
 from pathlib import Path
 from threading import Lock
+import asyncio as _asyncio
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 _progress_lock = Lock()
 _parse_progress = {}
+_progress_subscribers: dict[str, list[tuple[_asyncio.Queue, _asyncio.AbstractEventLoop]]] = {}
 
 PROGRESS_TTL = 3600  # 1 hour
 UPLOAD_DIR = os.path.abspath(os.environ.get("AUDIT_UPLOAD_DIR", "uploads"))
@@ -48,6 +50,13 @@ def _set_parse_progress(progress_id: Optional[str], percent: int, message: str, 
     with _progress_lock:
         _parse_progress[progress_id] = payload
         _cleanup_stale_progress(now)
+        subscribers = list(_progress_subscribers.get(progress_id, []))
+    # Push to all SSE subscribers (thread-safe via call_soon_threadsafe)
+    for q, loop in subscribers:
+        try:
+            loop.call_soon_threadsafe(q.put_nowait, payload)
+        except Exception:
+            pass  # queue full, loop closed, or wrong thread — skip
 
 def _get_parse_progress(progress_id: str):
     with _progress_lock:
@@ -79,27 +88,69 @@ import asyncio
 
 @router.get("/parse-progress/{progress_id}/stream")
 async def stream_parse_progress(progress_id: str):
-    """SSE endpoint — pushes progress updates until complete or error."""
+    """SSE endpoint — push-based progress updates until complete or error."""
+    loop = asyncio.get_running_loop()
+    q: asyncio.Queue = asyncio.Queue(maxsize=200)
+    # Subscribe with the event loop reference for thread-safe push
+    with _progress_lock:
+        _progress_subscribers.setdefault(progress_id, []).append((q, loop))
+        # Send current state immediately if it exists
+        current = _parse_progress.get(progress_id)
+    if current:
+        await q.put(current)
+
     async def event_generator():
-        last_sent = None
-        while True:
-            progress = None
+        import json as _json
+        last_percent = -1
+        last_msg = ""
+        try:
+            while True:
+                try:
+                    # Wait for a pushed update (with timeout as safety net)
+                    progress = await asyncio.wait_for(q.get(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    # No update pushed recently — check current state as fallback
+                    with _progress_lock:
+                        progress = _parse_progress.get(progress_id)
+                    if progress is None:
+                        progress = {"id": progress_id, "percent": 0, "message": "Waiting to start...", "stage": "queued"}
+                    # Always send on timeout so client knows we're alive
+                    yield f"data: {_json.dumps(progress)}\n\n"
+                    stage = progress.get("stage", "")
+                    if stage in ("complete", "error"):
+                        break
+                    continue
+
+                # Drain any queued updates to avoid lag — keep the latest
+                latest = progress
+                while not q.empty():
+                    try:
+                        latest = q.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                progress = latest
+
+                pct = progress.get("percent", 0)
+                stage = progress.get("stage", "")
+
+                # Send if percent changed, stage changed, or terminal
+                if pct != last_percent or stage in ("complete", "error") or progress.get("message") != last_msg:
+                    yield f"data: {_json.dumps(progress)}\n\n"
+                    last_percent = pct
+                    last_msg = progress.get("message")
+
+                if stage in ("complete", "error"):
+                    break
+        finally:
+            # Unsubscribe
             with _progress_lock:
-                progress = _parse_progress.get(progress_id)
-            if progress is None:
-                # Not started yet — send a queued placeholder
-                progress = {"id": progress_id, "percent": 0, "message": "Waiting to start...", "stage": "queued"}
-
-            if progress != last_sent:
-                import json as _json
-                yield f"data: {_json.dumps(progress)}\n\n"
-                last_sent = progress
-
-            stage = progress.get("stage", "")
-            if stage in ("complete", "error"):
-                # One final flush then close
-                break
-            await asyncio.sleep(0.4)
+                subs = _progress_subscribers.get(progress_id, [])
+                try:
+                    subs.remove((q, loop))
+                except ValueError:
+                    pass
+                if not subs:
+                    _progress_subscribers.pop(progress_id, None)
 
     return StreamingResponse(
         event_generator(),
@@ -297,25 +348,30 @@ async def parse_files(
             transactions_found=len(all_transactions),
         )
     
-    # Create session
+    # Create session — run in threadpool to keep event loop free for SSE
     session_service = SessionService(db)
     config = ConfigService(db)
     settings = config.get_all()
     settings['suspicious_threshold'] = threshold
     
-    session = session_service.create_session(
+    _set_parse_progress(progress_id, 62, "Creating audit session...", "creating_session")
+    await asyncio.sleep(0)  # yield to event loop so SSE can send this update
+    session = await run_in_threadpool(
+        session_service.create_session,
         name=f"Audit: {', '.join(p.filename for p in pdf)}",
         pdf_path=json.dumps(pdf_paths),
         csv_path=client_list_path,
         settings_snapshot=settings
     )
     _set_parse_progress(progress_id, 65, f"Saving {len(all_transactions)} transactions...", "saving_transactions")
+    await asyncio.sleep(0)
     
-    # Add transactions
-    transactions = session_service.add_transactions(session.id, all_transactions)
+    # Add transactions — run in threadpool (can be slow with many transactions)
+    transactions = await run_in_threadpool(session_service.add_transactions, session.id, all_transactions)
     _set_parse_progress(progress_id, 72, "Tagging transactions...", "tagging", transactions_found=len(transactions))
+    await asyncio.sleep(0)
     
-    # Auto-tag (pass session settings so per-session threshold is used)
+    # Auto-tag — run in threadpool so SSE receives granular tagging progress
     tagging = TaggingService(db)
     def report_tagging(done: int, total: int):
         pct = 72 if total == 0 else 72 + int((done / total) * 23)
@@ -328,16 +384,19 @@ async def parse_files(
             transaction_count=total,
         )
 
-    tags = tagging.auto_tag_session(session.id, clients, session_settings=settings, progress_callback=report_tagging)
+    tags = await run_in_threadpool(tagging.auto_tag_session, session.id, clients, session_settings=settings, progress_callback=report_tagging)
     _set_parse_progress(progress_id, 96, "Writing audit log...", "finalizing")
+    await asyncio.sleep(0)
     
-    # Log
+    # Log — run in threadpool
     audit = AuditService(db)
-    audit.log("session_created", "session", session.id, 
-              old_value=None, 
-              new_value={"transaction_count": len(transactions), "tag_count": len(tags)},
-              session_id=session.id, is_auto=True)
-    session_service.mark_session_status(session.id, "completed")
+    await run_in_threadpool(
+        audit.log, "session_created", "session", session.id,
+        old_value=None,
+        new_value={"transaction_count": len(transactions), "tag_count": len(tags)},
+        session_id=session.id, is_auto=True
+    )
+    await run_in_threadpool(session_service.mark_session_status, session.id, "completed")
     _set_parse_progress(
         progress_id,
         100,
@@ -607,15 +666,17 @@ async def append_pdfs_to_session(
         return {"session_id": session_id, "new_transaction_count": 0, "tag_count": 0}
 
     _set_parse_progress(progress_id, 72, f"Saving {len(all_new_transactions)} new transactions…", "saving_transactions")
+    await asyncio.sleep(0)
 
     # Store settings snapshot from session (preserve original threshold etc.)
     session_settings = session.settings_snapshot or {}
     config = ConfigService(db)
     effective_settings = {**config.get_all(), **session_settings}
 
-    new_transactions = session_service.add_transactions(session_id, all_new_transactions)
+    new_transactions = await run_in_threadpool(session_service.add_transactions, session_id, all_new_transactions)
 
     _set_parse_progress(progress_id, 80, "Tagging new transactions…", "tagging")
+    await asyncio.sleep(0)
 
     tagging = TaggingService(db)
     new_tx_ids = [t.id for t in new_transactions]
@@ -625,6 +686,9 @@ async def append_pdfs_to_session(
 
     tags = await run_in_threadpool(_tag_new_only)
 
+    _set_parse_progress(progress_id, 92, "Finalizing…", "finalizing")
+    await asyncio.sleep(0)
+
     # Persist appended PDF paths without mutating the user-visible session name.
     try:
         existing_paths = json.loads(session.pdf_path or "[]") if session.pdf_path else []
@@ -633,16 +697,17 @@ async def append_pdfs_to_session(
     except (json.JSONDecodeError, TypeError):
         existing_paths = [session.pdf_path] if session.pdf_path else []
     session.pdf_path = json.dumps([p for p in [*existing_paths, *new_pdf_paths] if p])
-    db.commit()
+    await run_in_threadpool(db.commit)
 
     audit = AuditService(db)
-    audit.log(
+    await run_in_threadpool(
+        audit.log,
         "session_created", "session", session_id,
         old_value={"existing_transactions": existing_count},
         new_value={"appended_transactions": len(new_transactions), "tag_count": len(tags)},
         session_id=session_id, is_auto=False,
     )
-    session_service.mark_session_status(session_id, "completed")
+    await run_in_threadpool(session_service.mark_session_status, session_id, "completed")
 
     _set_parse_progress(
         progress_id, 100,
