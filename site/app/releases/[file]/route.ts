@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 
+function normalizeAssetName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ file: string }> }
@@ -46,10 +50,15 @@ export async function GET(
     const assets = release.assets || [];
     const requestedFile = decodeURIComponent(file);
 
-    // 2. Find asset matching the requested filename
-    const asset = assets.find(
-      (a: { name: string; id: number }) => a.name.toLowerCase() === requestedFile.toLowerCase()
-    );
+    // 2. Find asset matching the requested filename. Electron Builder outputs
+    // dot-separated names, but browsers/users may request space-separated names.
+    const normalizedRequest = normalizeAssetName(requestedFile);
+    const asset = assets.find((a: { name: string; id: number }) => {
+      return (
+        a.name.toLowerCase() === requestedFile.toLowerCase() ||
+        normalizeAssetName(a.name) === normalizedRequest
+      );
+    });
 
     if (!asset) {
       return NextResponse.json(
@@ -117,7 +126,7 @@ export async function GET(
       // Never stream GitHub error JSON as an .exe; that produces broken downloads.
       const headers = new Headers({
         "Content-Type": assetRes.headers.get("Content-Type") || "application/octet-stream",
-        "Content-Disposition": `attachment; filename="${requestedFile.replace(/"/g, "")}"`,
+        "Content-Disposition": `attachment; filename="${asset.name.replace(/"/g, "")}"`,
         "Cache-Control": "no-cache, no-store, must-revalidate",
       });
       const contentLength = assetRes.headers.get("Content-Length");
