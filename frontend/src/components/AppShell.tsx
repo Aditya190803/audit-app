@@ -12,7 +12,7 @@ import { useAuditAnalyticsWorker } from '../hooks/useAuditAnalyticsWorker'
 import { EMPTY_AUDIT_ANALYTICS } from '../utils/auditAnalytics'
 import type { AdvancedFilters } from '../utils/auditAnalytics'
 import type { AuditSession } from '../types/api'
-import { deleteSession, renameSession, retagSession, getRecoverySession, appendPdfsToSession } from '../lib/api'
+import { deleteSession, renameSession, retagSession, getRecoverySession } from '../lib/api'
 
 import { FileDropZone } from './FileDropZone'
 import { DataTable } from './DataTable'
@@ -128,7 +128,7 @@ export function AppShell() {
 
   // Active view
   const [activeView, setActiveView] = useState<'data' | 'review' | 'activity'>('data')
-  const appendInputRef = useRef<HTMLInputElement>(null)
+  const [isRetagging, setIsRetagging] = useState(false)
 
   // Handle exception filter from review page
   const handleExceptionFilter = useCallback((key: string, value: string) => {
@@ -170,27 +170,18 @@ export function AppShell() {
 
   // Re-tag handler
   const handleRetag = useCallback(async () => {
-    if (!currentSession) return
+    if (!currentSession || isRetagging) return
+    setIsRetagging(true)
     try {
       const res = await retagSession(currentSession.id)
       await refreshCurrentSession()
-      pushToast({ message: `Re-tagged: ${res.data.tag_count} tags applied` })
+      pushToast({ message: `Re-tagged: ${res.data.tag_count} tags applied`, type: 'info' })
     } catch {
       pushToast({ message: 'Re-tagging failed', type: 'error' })
+    } finally {
+      setIsRetagging(false)
     }
-  }, [currentSession, pushToast, refreshCurrentSession])
-
-  const handleAppendPdfs = async (files: FileList | null) => {
-    if (!files || files.length === 0 || !currentSession) return
-    try {
-      pushToast({ message: 'Appending files...' })
-      await appendPdfsToSession(currentSession.id, Array.from(files))
-      await refreshCurrentSession()
-      pushToast({ message: 'Files appended successfully' })
-    } catch {
-      pushToast({ message: 'Failed to append files', type: 'error' })
-    }
-  }
+  }, [currentSession, isRetagging, pushToast, refreshCurrentSession])
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[var(--surface)]">
@@ -218,21 +209,12 @@ export function AppShell() {
                 onViewChange={setActiveView}
                 onExport={toggleExport}
                 onRetag={handleRetag}
-                onAppendPdfs={() => appendInputRef.current?.click()}
+                isRetagging={isRetagging}
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
                 filterCount={activeFilterCount()}
                 onToggleFilters={toggleFiltersExpanded}
                 isComputing={isComputing}
-              />
-              {/* Hidden file input for appending PDFs */}
-              <input
-                ref={appendInputRef}
-                type="file"
-                accept=".pdf"
-                multiple
-                className="hidden"
-                onChange={(e) => handleAppendPdfs(e.target.files)}
               />
             </>
           )}
@@ -571,7 +553,7 @@ function Toolbar({
   onViewChange,
   onExport,
   onRetag,
-  onAppendPdfs,
+  isRetagging,
   searchQuery,
   onSearchChange,
   filterCount,
@@ -583,7 +565,7 @@ function Toolbar({
   onViewChange: (v: 'data' | 'review' | 'activity') => void
   onExport: () => void
   onRetag: () => void
-  onAppendPdfs: () => void
+  isRetagging: boolean
   searchQuery: string
   onSearchChange: (q: string) => void
   filterCount: number
@@ -665,11 +647,16 @@ function Toolbar({
 
       {/* Actions */}
       <div className="flex items-center gap-1">
-        <button onClick={onRetag} className="btn-icon p-2" title="Re-tag session">
-          <RotateCcw className="h-4 w-4" strokeWidth={1.5} />
-        </button>
-        <button onClick={onAppendPdfs} className="btn-icon p-2" title="Append more PDFs to this session">
-          <Plus className="h-4 w-4" strokeWidth={1.5} />
+        <button
+          onClick={onRetag}
+          disabled={isRetagging}
+          className={`btn-icon p-2 ${isRetagging ? 'opacity-60 cursor-not-allowed' : ''}`}
+          title="Re-tag session"
+        >
+          {isRetagging
+            ? <Loader2 className="h-4 w-4 animate-spin text-[var(--primary)]" strokeWidth={1.5} />
+            : <RotateCcw className="h-4 w-4" strokeWidth={1.5} />
+          }
         </button>
         <button onClick={onExport} className="btn-icon p-2" title="Export">
           <Download className="h-4 w-4" strokeWidth={1.5} />
