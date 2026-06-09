@@ -155,6 +155,16 @@ const workflowSteps = [
 
 const allPlatforms: Platform[] = ["windows", "mac", "linux"];
 
+function getManifestPath(yaml: string): string | null {
+  const pathMatch = yaml.match(/^path:\s*(.+)$/m);
+  if (pathMatch?.[1]) return pathMatch[1].trim();
+
+  const urlMatch = yaml.match(/^\s*-\s*url:\s*(.+)$/m);
+  if (urlMatch?.[1]) return urlMatch[1].trim();
+
+  return null;
+}
+
 /* ── Intersection Observer ── */
 function useInView(threshold = 0.2) {
   const ref = useRef<HTMLDivElement>(null);
@@ -475,8 +485,15 @@ export default function LandingPage({ initialVersion }: LandingPageProps) {
         const match = yaml.match(/^version:\s*(.+)$/m);
         if (match && match[1]) {
           const latestVersion = match[1].trim();
+          const manifestPath = getManifestPath(yaml);
+          const nextPlatforms = getPlatformInfo(latestVersion);
+
+          if (manifestPath) {
+            nextPlatforms.windows.downloads.x64.fileName = manifestPath;
+          }
+
           setAppVersion(latestVersion);
-          setPlatforms(getPlatformInfo(latestVersion));
+          setPlatforms(nextPlatforms);
         }
       })
       .catch((err) => {

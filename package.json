@@ -1,6 +1,6 @@
 {
   "name": "bank-audit-app",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Bank Statement Auditing App",
   "main": "./out/main/main.js",
   "author": "SKA Auditing",

@@ -44,20 +44,21 @@ export async function GET(
 
     const release = await releaseRes.json();
     const assets = release.assets || [];
+    const requestedFile = decodeURIComponent(file);
 
     // 2. Find asset matching the requested filename
     const asset = assets.find(
-      (a: { name: string; id: number }) => a.name.toLowerCase() === file.toLowerCase()
+      (a: { name: string; id: number }) => a.name.toLowerCase() === requestedFile.toLowerCase()
     );
 
     if (!asset) {
       return NextResponse.json(
-        { error: `Asset "${file}" not found in latest release (${release.tag_name})` },
+        { error: `Asset "${requestedFile}" not found in latest release (${release.tag_name})` },
         { status: 404 }
       );
     }
 
-    const isManifest = file.endsWith(".yml");
+    const isManifest = requestedFile.endsWith(".yml");
 
     if (isManifest) {
       // Fetch and serve YAML manifests directly
@@ -105,13 +106,24 @@ export async function GET(
         }
       }
 
-      // Fallback: stream if redirect wasn't handled
-      return new Response(assetRes.body, {
-        headers: {
-          "Content-Type": assetRes.headers.get("Content-Type") || "application/octet-stream",
-          "Content-Length": assetRes.headers.get("Content-Length") || "",
-        },
+      if (!assetRes.ok || !assetRes.body) {
+        return NextResponse.json(
+          { error: `Failed to fetch binary asset: ${assetRes.status} ${assetRes.statusText}` },
+          { status: 502 }
+        );
+      }
+
+      // Fallback: stream only when GitHub returned the binary body successfully.
+      // Never stream GitHub error JSON as an .exe; that produces broken downloads.
+      const headers = new Headers({
+        "Content-Type": assetRes.headers.get("Content-Type") || "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${requestedFile.replace(/"/g, "")}"`,
+        "Cache-Control": "no-cache, no-store, must-revalidate",
       });
+      const contentLength = assetRes.headers.get("Content-Length");
+      if (contentLength) headers.set("Content-Length", contentLength);
+
+      return new Response(assetRes.body, { headers });
     }
   } catch (error: unknown) {
     return NextResponse.json(
