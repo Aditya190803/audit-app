@@ -1,10 +1,9 @@
 {
   "name": "bank-audit-app",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Bank Statement Auditing App",
   "main": "./out/main/main.js",
   "author": "SKA Auditing",
-  "license": "MIT",
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",
@@ -89,8 +88,7 @@
       "url": "${env.UPDATE_FEED_URL}"
     },
     "win": {
-      "target": "nsis",
-      "publisherName": "SKA Auditing"
+      "target": "nsis"
     },
     "mac": {
       "target": "dmg",
