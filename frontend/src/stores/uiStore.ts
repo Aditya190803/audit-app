@@ -4,6 +4,18 @@ import { DEFAULT_ADVANCED_FILTERS } from '../utils/auditAnalytics'
 
 type ResultFilter = 'all' | 'client' | 'broker' | 'suspicious'
 type ContextPanelMode = 'review' | 'pdf'
+export type ManualTagType = 'client' | 'broker' | 'suspicious'
+
+export interface TagDetailResult {
+  tagType: ManualTagType
+  detail: string
+}
+
+interface TagDetailRequest {
+  id: number
+  tagType: ManualTagType | null
+  scope: 'single' | 'bulk'
+}
 
 interface Toast {
   id: number
@@ -30,9 +42,12 @@ interface UIState {
   filtersExpanded: boolean
   toasts: Toast[]
   activeTransactionId: number | null
+  tagDetailRequest: TagDetailRequest | null
   // Right panel state
   contextPanelOpen: boolean
   contextPanelMode: ContextPanelMode
+  requestTagDetail: (request: Omit<TagDetailRequest, 'id'>) => Promise<TagDetailResult | null>
+  resolveTagDetail: (result: TagDetailResult | null) => void
   pushToast: (toast: Omit<Toast, 'id'>) => void
   popToast: (id: number) => void
   toggleSidebar: () => void
@@ -59,6 +74,8 @@ interface UIState {
   setContextPanelOpen: (open: boolean) => void
 }
 
+let tagDetailResolver: ((result: TagDetailResult | null) => void) | null = null
+
 export const useUIStore = create<UIState>((set, get) => ({
   sidebarOpen: true,
   settingsOpen: false,
@@ -75,9 +92,20 @@ export const useUIStore = create<UIState>((set, get) => ({
   advancedFilters: DEFAULT_ADVANCED_FILTERS,
   filtersExpanded: false,
   activeTransactionId: null,
+  tagDetailRequest: null,
   toasts: [],
   contextPanelOpen: true,
   contextPanelMode: 'review',
+  requestTagDetail: (request) => new Promise((resolve) => {
+    tagDetailResolver?.(null)
+    tagDetailResolver = resolve
+    set({ tagDetailRequest: { ...request, id: Date.now() } })
+  }),
+  resolveTagDetail: (result) => {
+    tagDetailResolver?.(result)
+    tagDetailResolver = null
+    set({ tagDetailRequest: null })
+  },
   pushToast: (toast) => {
     const id = Date.now()
     set((s) => ({ toasts: [...s.toasts, { ...toast, id }] }))

@@ -26,6 +26,7 @@ import { KeyboardShortcuts } from './KeyboardShortcuts'
 import { ConfirmDialog } from './ConfirmDialog'
 import { TransactionDrawer } from './TransactionDrawer'
 import { BulkActionBar } from './BulkActionBar'
+import { TagDetailDialog } from './TagDetailDialog'
 
 /* ════════════════════════════════════════════════════════════════════════════
    APP SHELL — The main orchestrator
@@ -308,6 +309,7 @@ export function AppShell() {
       />
       {/* Bulk action floating bar */}
       <BulkActionBar />
+      <TagDetailDialog />
       <ToastContainer />
       <KeyboardShortcuts />
     </div>

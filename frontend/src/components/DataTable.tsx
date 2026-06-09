@@ -21,6 +21,7 @@ import { useUIStore } from '../stores/uiStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { TagBadgeList } from './TagBadge'
+import { buildManualTagReason } from './TagDetailDialog'
 import { addTag, removeTag, TRANSACTION_WARN_THRESHOLD } from '../lib/api'
 
 const ROW_HEIGHT = 40
@@ -41,7 +42,7 @@ interface DataTableProps {
 }
 
 export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) => {
-  const { selectedTransactionIds, selectTransaction, clearSelection, pushToast, resultFilter, setActiveTransaction } = useUIStore()
+  const { selectedTransactionIds, selectTransaction, clearSelection, pushToast, resultFilter, setActiveTransaction, requestTagDetail } = useUIStore()
   const { refreshCurrentSession } = useSessionStore()
   const suspiciousThreshold = useSettingsStore((s) => (s.settings.suspicious_threshold as number) || 10000)
 
@@ -199,11 +200,18 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
               const types = ['client', 'broker', 'suspicious'] as const
               const idx = types.indexOf(tag.tag_type)
               const next = types[(idx + 1) % types.length]
-              // Preserve original reason and confidence (Fix TD-10)
-              await removeTag(tag.id)
-              await addTag(row.original.id, next, tag.reason || `Cycled from ${tag.tag_type}`, tag.confidence, 'manual', true)
+              const result = await requestTagDetail({ tagType: next, scope: 'single' })
+              if (!result) return
+              await addTag(row.original.id, result.tagType, buildManualTagReason(result.tagType, result.detail), tag.confidence, 'manual', true)
               await refreshCurrentSession()
-              pushToast({ message: `Tag changed to ${next}` })
+              pushToast({ message: `Tag changed to ${result.tagType}` })
+            }}
+            onAddTag={async () => {
+              const result = await requestTagDetail({ tagType: null, scope: 'single' })
+              if (!result) return
+              await addTag(row.original.id, result.tagType, buildManualTagReason(result.tagType, result.detail), 1.0, 'manual', true)
+              await refreshCurrentSession()
+              pushToast({ message: `Tag added as ${result.tagType}` })
             }}
           />
         ),
@@ -248,7 +256,7 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
         maxSize: 100,
       },
     ],
-    [selectedTransactionIds, selectTransaction, clearSelection, refreshCurrentSession, pushToast]
+    [selectedTransactionIds, selectTransaction, clearSelection, refreshCurrentSession, pushToast, requestTagDetail]
   )
 
   const table = useReactTable({

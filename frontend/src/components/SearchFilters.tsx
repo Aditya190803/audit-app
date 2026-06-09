@@ -53,12 +53,26 @@ export const SearchFilters: React.FC<SearchFiltersProps> = ({ analytics, transac
     return analytics.monthlyBreakdown.map((m) => m.month)
   }, [analytics.monthlyBreakdown])
 
+  const auditCategoryCounts = useMemo(() => {
+    return transactions.reduce(
+      (counts, tx) => {
+        counts.all += 1
+        const tagTypes = new Set(tx.tags.map((tag) => tag.tag_type))
+        if (tagTypes.has('client')) counts.client += 1
+        if (tagTypes.has('broker')) counts.broker += 1
+        if (tagTypes.has('suspicious')) counts.suspicious += 1
+        return counts
+      },
+      { all: 0, client: 0, broker: 0, suspicious: 0 },
+    )
+  }, [transactions])
+
   type CategoryTab = 'all' | 'client' | 'broker' | 'suspicious'
   const TABS: { key: CategoryTab; label: string; icon: React.ReactNode; count: number }[] = [
-    { key: 'all', label: 'All', icon: <Layers className="h-3.5 w-3.5" strokeWidth={1.5} />, count: analytics.totals.count },
-    { key: 'client', label: 'Client', icon: <Users className="h-3.5 w-3.5" strokeWidth={1.5} />, count: analytics.tagDistribution.client },
-    { key: 'broker', label: 'Broker', icon: <Tag className="h-3.5 w-3.5" strokeWidth={1.5} />, count: analytics.tagDistribution.broker },
-    { key: 'suspicious', label: 'Suspicious', icon: <Shield className="h-3.5 w-3.5" strokeWidth={1.5} />, count: analytics.tagDistribution.suspicious },
+    { key: 'all', label: 'All', icon: <Layers className="h-3.5 w-3.5" strokeWidth={1.5} />, count: auditCategoryCounts.all },
+    { key: 'client', label: 'Client', icon: <Users className="h-3.5 w-3.5" strokeWidth={1.5} />, count: auditCategoryCounts.client },
+    { key: 'broker', label: 'Broker', icon: <Tag className="h-3.5 w-3.5" strokeWidth={1.5} />, count: auditCategoryCounts.broker },
+    { key: 'suspicious', label: 'Suspicious', icon: <Shield className="h-3.5 w-3.5" strokeWidth={1.5} />, count: auditCategoryCounts.suspicious },
   ]
 
   return (

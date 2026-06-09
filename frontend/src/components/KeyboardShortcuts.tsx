@@ -3,6 +3,7 @@ import { useHotkeys } from 'react-hotkeys-hook'
 import { useUIStore } from '../stores/uiStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { bulkAddTags } from '../lib/api'
+import { buildManualTagReason } from './TagDetailDialog'
 
 export const KeyboardShortcuts: React.FC = () => {
   const { toggleSidebar, toggleSettings, toggleExport, selectedTransactionIds, goHome, setShowNewAudit } = useUIStore()
@@ -35,13 +36,22 @@ export const KeyboardShortcuts: React.FC = () => {
   useHotkeys('ctrl+shift+s', (e) => { e.preventDefault(); toggleSettings() })
   useHotkeys('ctrl+shift+r', (e) => { e.preventDefault(); goHome() })
 
-  const handleBulkTag = async (tagType: string) => {
+  const handleBulkTag = async (tagType: 'client' | 'broker' | 'suspicious') => {
     const { refreshCurrentSession } = useSessionStore.getState()
-    const { selectedTransactionIds, clearSelection } = useUIStore.getState()
+    const { selectedTransactionIds, clearSelection, pushToast, requestTagDetail } = useUIStore.getState()
     if (selectedTransactionIds.length === 0) return
-    await bulkAddTags(selectedTransactionIds, tagType)
-    await refreshCurrentSession()
-    clearSelection()
+
+    const result = await requestTagDetail({ tagType, scope: 'bulk' })
+    if (!result) return
+
+    try {
+      await bulkAddTags(selectedTransactionIds, result.tagType, buildManualTagReason(result.tagType, result.detail), 1.0)
+      await refreshCurrentSession()
+      clearSelection()
+      pushToast({ message: `Tagged ${selectedTransactionIds.length} transactions as ${result.tagType}` })
+    } catch {
+      pushToast({ message: 'Bulk tag failed', type: 'error' })
+    }
   }
 
   useHotkeys('ctrl+1', (e) => { e.preventDefault(); if (selectedTransactionIds.length > 0) handleBulkTag('client') })

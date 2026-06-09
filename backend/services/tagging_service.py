@@ -393,7 +393,14 @@ class TaggingService:
                        reason: str = "", confidence: float = 1.0,
                        source: str = "manual", is_manual: bool = True,
                        commit: bool = True) -> Tag:
-        """Add a manual tag to a transaction."""
+        """Set a manual tag on a transaction.
+
+        A transaction can have only one active tag. Manual tagging replaces any
+        existing client, broker, or suspicious tag instead of adding a second
+        category beside it.
+        """
+        self.db.query(Tag).filter(Tag.transaction_id == transaction_id).delete(synchronize_session=False)
+        self.db.flush()
         tag = Tag(
             transaction_id=transaction_id,
             tag_type=tag_type,

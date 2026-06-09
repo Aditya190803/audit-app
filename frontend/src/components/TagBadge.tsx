@@ -120,8 +120,19 @@ export const TagBadgeList: React.FC<{
   tags: Tag[]
   onRemoveTag?: (tagId: number) => void
   onCycleTag?: (tag: Tag) => void
-}> = React.memo(({ tags, onRemoveTag, onCycleTag }) => {
-  if (!tags || tags.length === 0) return (
+  onAddTag?: () => void
+}> = React.memo(({ tags, onRemoveTag, onCycleTag, onAddTag }) => {
+  if (!tags || tags.length === 0) return onAddTag ? (
+    <button
+      onClick={(e) => {
+        e.stopPropagation()
+        onAddTag()
+      }}
+      className="text-xs text-[var(--text-tertiary)] italic hover:text-[var(--primary)] transition-colors"
+    >
+      + Tag
+    </button>
+  ) : (
     <span className="text-xs text-[var(--text-tertiary)] italic">Untagged</span>
   )
   const tag = tags[0]

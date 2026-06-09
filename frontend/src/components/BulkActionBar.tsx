@@ -1,8 +1,9 @@
-import React, { useState } from 'react'
-import { Tag, X } from 'lucide-react'
+import React, { useState, useMemo } from 'react'
+import { Tag, Trash2, X } from 'lucide-react'
 import { useUIStore } from '../stores/uiStore'
 import { useSessionStore } from '../stores/sessionStore'
-import { addTag } from '../lib/api'
+import { bulkAddTags, bulkRemoveTags } from '../lib/api'
+import { buildManualTagReason } from './TagDetailDialog'
 
 const TAG_OPTIONS: { value: 'client' | 'broker' | 'suspicious'; label: string; cls: string }[] = [
   { value: 'client', label: 'Client', cls: 'text-[var(--success)]' },
@@ -11,29 +12,54 @@ const TAG_OPTIONS: { value: 'client' | 'broker' | 'suspicious'; label: string; c
 ]
 
 export const BulkActionBar: React.FC = () => {
-  const { selectedTransactionIds, clearSelection, pushToast } = useUIStore()
-  const { refreshCurrentSession } = useSessionStore()
+  const { selectedTransactionIds, clearSelection, pushToast, requestTagDetail } = useUIStore()
+  const { transactions, refreshCurrentSession } = useSessionStore()
   const [loading, setLoading] = useState(false)
   const [tagMenuOpen, setTagMenuOpen] = useState(false)
+
+  const selectedTags = useMemo(() => {
+    const selected = new Set(selectedTransactionIds)
+    return transactions
+      .filter((tx) => selected.has(tx.id))
+      .flatMap((tx) => tx.tags)
+  }, [selectedTransactionIds, transactions])
 
   if (selectedTransactionIds.length === 0) return null
 
   const count = selectedTransactionIds.length
 
   const handleBulkTag = async (tagType: 'client' | 'broker' | 'suspicious') => {
+    const result = await requestTagDetail({ tagType, scope: 'bulk' })
+    if (!result) return
+
     setLoading(true)
     setTagMenuOpen(false)
     try {
-      await Promise.all(
-        selectedTransactionIds.map((id) =>
-          addTag(id, tagType, `Bulk tagged as ${tagType}`, 1.0, 'manual', true)
-        )
-      )
+      await bulkAddTags(selectedTransactionIds, result.tagType, buildManualTagReason(result.tagType, result.detail), 1.0)
       await refreshCurrentSession()
-      pushToast({ message: `Tagged ${count} transactions as ${tagType}` })
+      pushToast({ message: `Tagged ${count} transactions as ${result.tagType}` })
       clearSelection()
     } catch {
       pushToast({ message: 'Bulk tag failed', type: 'error' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleRemoveTags = async () => {
+    if (selectedTags.length === 0) {
+      pushToast({ message: 'Selected transactions have no tags to remove' })
+      return
+    }
+    setLoading(true)
+    setTagMenuOpen(false)
+    try {
+      await bulkRemoveTags(selectedTags.map((tag) => tag.id))
+      await refreshCurrentSession()
+      pushToast({ message: `Removed ${selectedTags.length} tags` })
+      clearSelection()
+    } catch {
+      pushToast({ message: 'Remove tags failed', type: 'error' })
     } finally {
       setLoading(false)
     }
@@ -69,6 +95,15 @@ export const BulkActionBar: React.FC = () => {
                   <span className="capitalize font-semibold">{opt.label}</span>
                 </button>
               ))}
+              <div className="my-1 h-px bg-[var(--border)]" />
+              <button
+                onClick={handleRemoveTags}
+                disabled={loading || selectedTags.length === 0}
+                className="flex items-center gap-2 w-full px-3 py-2 text-xs font-semibold text-[var(--danger)] hover:bg-[var(--danger-bg)] transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" strokeWidth={1.5} />
+                Remove tags
+              </button>
             </div>
           )}
         </div>

@@ -1,4 +1,5 @@
 import React, { useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { AlertTriangle, X } from 'lucide-react'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 
@@ -28,8 +29,8 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 
   if (!isOpen) return null
 
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 animate-fade-in">
+  const dialog = (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[var(--text-primary)]/40 animate-fade-in">
       <div
         ref={panelRef}
         tabIndex={-1}
@@ -75,7 +76,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             onClick={onConfirm}
             className={`text-xs px-4 py-1.5 rounded-[var(--radius-md)] font-medium transition-colors duration-150 ${
               danger
-                ? 'bg-[var(--danger)] text-white hover:bg-[var(--danger)]/90'
+                ? 'bg-[var(--danger)] text-[var(--surface)] hover:bg-[var(--danger)]/90'
                 : 'btn-primary'
             }`}
           >
@@ -85,4 +86,6 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       </div>
     </div>
   )
+
+  return createPortal(dialog, document.body)
 }

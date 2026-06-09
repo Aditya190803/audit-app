@@ -190,9 +190,14 @@ export async function bulkRemoveTags(tagIds: number[]) {
   return client.post('/tags/bulk-remove', tagIds)
 }
 
-export async function bulkAddTags(transactionIds: number[], tagType: string) {
+export async function bulkAddTags(transactionIds: number[], tagType: string, reason?: string, confidence = 1.0) {
   const client = await getClient()
-  return client.post('/tags/bulk-add', { transaction_ids: transactionIds, tag_type: tagType })
+  return client.post('/tags/bulk-add', {
+    transaction_ids: transactionIds,
+    tag_type: tagType,
+    reason,
+    confidence,
+  })
 }
 
 export async function getBrokers() {
