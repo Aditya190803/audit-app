@@ -464,13 +464,19 @@ interface LandingPageProps {
 }
 
 export default function LandingPage({ initialVersion }: LandingPageProps) {
-  const [detectedOS] = useState<Platform>(() => detectOS());
+  const [detectedOS, setDetectedOS] = useState<Platform>("windows");
   const [showAllPlatforms, setShowAllPlatforms] = useState(false);
   const [appVersion, setAppVersion] = useState(initialVersion);
   const [platforms, setPlatforms] = useState(() => getPlatformInfo(initialVersion));
   const { ref: heroRefElement, inView: heroInView } = useInView(0.1);
   const { ref: featuresRefElement, inView: featuresInView } = useInView();
   const { ref: downloadRefElement, inView: downloadInView } = useInView();
+
+  // Hydration-safe OS detection: default to "windows" during SSR,
+  // then detect the real OS after mount to avoid hydration mismatches.
+  useEffect(() => {
+    setDetectedOS(detectOS());
+  }, []);
 
   useEffect(() => {
 
@@ -519,6 +525,12 @@ export default function LandingPage({ initialVersion }: LandingPageProps) {
             <a href="#features" className="hidden sm:inline text-[13px] text-text-tertiary hover:text-text-primary transition-colors cursor-pointer">
               Features
             </a>
+            <Link
+              href="/versions"
+              className="hidden sm:inline text-[13px] text-text-tertiary hover:text-text-primary transition-colors"
+            >
+              All Versions
+            </Link>
             <a
               href="#download"
               className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-primary px-3.5 py-1.5 text-sm font-medium text-white transition-all duration-150 hover:bg-primary-hover hover:-translate-y-px shadow-xs cursor-pointer"
@@ -784,9 +796,17 @@ export default function LandingPage({ initialVersion }: LandingPageProps) {
                 Bank Audit App
               </span>
             </div>
-            <p className="text-[11px] text-text-tertiary">
-              Built for Shah Kapadia &amp; Associates · theska.in
-            </p>
+            <div className="flex items-center gap-4">
+              <Link
+                href="/versions"
+                className="text-[11px] text-text-tertiary hover:text-text-primary transition-colors"
+              >
+                All Versions
+              </Link>
+              <p className="text-[11px] text-text-tertiary">
+                Built for Shah Kapadia &amp; Associates · theska.in
+              </p>
+            </div>
           </div>
         </div>
       </footer>
