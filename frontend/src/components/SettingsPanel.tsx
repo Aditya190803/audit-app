@@ -42,6 +42,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose })
     if (!isOpen) return
 
     window.electronAPI?.getAppVersion?.().then(setAppVersion).catch(() => setAppVersion(''))
+    window.electronAPI?.getUpdateStatus?.().then(setUpdateStatus).catch(() => {})
     return window.electronAPI?.onUpdateStatus?.((status) => {
       setUpdateStatus(status)
     })

@@ -34,6 +34,7 @@ export interface ElectronAPI {
     filters?: { name: string; extensions: string[] }[]
   }) => Promise<{ canceled: boolean; filePath?: string; exportPathToken?: string }>
   getAppVersion: () => Promise<string>
+  getUpdateStatus: () => Promise<AppUpdateStatus>
   checkForUpdates: () => Promise<AppUpdateStatus>
   installUpdate: () => Promise<{ success: boolean; error?: string }>
   onUpdateStatus: (callback: (status: AppUpdateStatus) => void) => () => void

@@ -41,6 +41,10 @@ function isCsv(file: File): boolean {
   return file.name.endsWith('.csv') || file.type === 'text/csv'
 }
 
+function isPdf(file: File): boolean {
+  return file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf'
+}
+
 const COMMON_NAME_COLUMNS = [
   'name', 'client_name', 'client name', 'customer_name', 'customer name',
   'party_name', 'party name', 'account_name', 'account name', 'client',
@@ -407,26 +411,64 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
     }
   }, [clientListFile])
 
-  const onDropPdf = useCallback((acceptedFiles: File[]) => {
-    const valid = acceptedFiles.filter(f => f.type === 'application/pdf' || f.name.endsWith('.pdf'))
+  const selectClientListFile = useCallback((file: File) => {
+    setClientListFile(file)
+    setSheetName('')
+    setSheetNames([])
+    setNameColumn('')
+    setDetectedColumns([])
+    setCsvFirstRows([])
+    setHeaderRow(0)
+    setExcelWorkbook(null)
+  }, [])
+
+  const addPdfFiles = useCallback((files: File[]) => {
+    const valid = files.filter(isPdf)
     if (valid.length > 0) {
-      setPdfFiles(prev => [...prev, ...valid])
+      setPdfFiles((prev) => {
+        const seen = new Set(prev.map((f) => `${f.name}:${f.size}:${f.lastModified}`))
+        const next = [...prev]
+        for (const file of valid) {
+          const key = `${file.name}:${file.size}:${file.lastModified}`
+          if (!seen.has(key)) {
+            seen.add(key)
+            next.push(file)
+          }
+        }
+        return next
+      })
     }
   }, [])
 
-  const onDropClientList = useCallback((acceptedFiles: File[]) => {
-    const file = acceptedFiles[0]
-    if (file) {
-      setClientListFile(file)
-      setSheetName('')
-      setSheetNames([])
-      setNameColumn('')
-      setDetectedColumns([])
-      setCsvFirstRows([])
-      setHeaderRow(0)
-      setExcelWorkbook(null)
+  const onDropAnyFiles = useCallback((acceptedFiles: File[]) => {
+    addPdfFiles(acceptedFiles)
+    const clientCandidate = acceptedFiles.find((file) => isCsv(file) || isExcel(file))
+    if (clientCandidate) {
+      selectClientListFile(clientCandidate)
     }
-  }, [])
+  }, [addPdfFiles, selectClientListFile])
+
+  const onDropPdf = useCallback((acceptedFiles: File[]) => {
+    addPdfFiles(acceptedFiles)
+  }, [addPdfFiles])
+
+  const onDropClientList = useCallback((acceptedFiles: File[]) => {
+    const file = acceptedFiles.find((candidate) => isCsv(candidate) || isExcel(candidate))
+    if (file) {
+      selectClientListFile(file)
+    }
+  }, [selectClientListFile])
+
+  const combinedDropzone = useDropzone({
+    onDrop: onDropAnyFiles,
+    accept: {
+      'application/pdf': ['.pdf'],
+      'text/csv': ['.csv'],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      'application/vnd.ms-excel': ['.xls']
+    },
+    multiple: true
+  })
 
   const pdfDropzone = useDropzone({
     onDrop: onDropPdf,
@@ -475,6 +517,9 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
   }
 
   const isReady = pdfFiles.length > 0 && clientListFile && !isProcessing && nameColumn.trim().length > 0 && invalidPdfNames.length === 0
+  const combinedSelectedLabel = pdfFiles.length > 0 || clientListFile
+    ? `${pdfFiles.length} PDF${pdfFiles.length === 1 ? '' : 's'}${clientListFile ? ` + ${clientListFile.name}` : ''}`
+    : undefined
   const progressPercent = Math.max(0, Math.min(100, processingProgress?.percent ?? 0))
 
   // ETA calculation
@@ -515,21 +560,31 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
   return (
     <div className="space-y-8">
       {/* Drop zones */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="space-y-4">
         <FileDropContainer
-          dropzone={pdfDropzone}
+          dropzone={combinedDropzone}
+          label="Drop PDFs and client list together"
+          activeLabel="Drop files to sort automatically"
+          selectedLabel={combinedSelectedLabel}
+          helpText="PDF statements plus one CSV or Excel file in one action"
+        />
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <FileDropContainer
+            dropzone={pdfDropzone}
           label="Bank Statement"
           activeLabel="Drop PDFs here"
           selectedLabel={pdfFiles.length > 0 ? `${pdfFiles.length} PDF${pdfFiles.length > 1 ? 's' : ''} selected` : undefined}
           helpText="PDF only (multiple allowed)"
-        />
+          />
 
-        <FileDropContainer
-          dropzone={clientListDropzone}
-          label="Client List"
-          activeLabel="Drop file here"
-          helpText="CSV or Excel"
-        />
+          <FileDropContainer
+            dropzone={clientListDropzone}
+            label="Client List"
+            activeLabel="Drop file here"
+            helpText="CSV or Excel"
+          />
+        </div>
       </div>
 
       {/* Invalid PDF warning */}

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, session } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, session, screen } from 'electron'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -122,6 +122,30 @@ function dataPath(...segments: string[]): string {
   return app.isPackaged
     ? path.join(app.getPath('userData'), ...segments)
     : path.join(APP_ROOT, ...segments)
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value))
+}
+
+function getInitialWindowBounds(): { width: number; height: number } {
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize
+  return {
+    width: clamp(Math.round(width * 0.88), 1280, 1900),
+    height: clamp(Math.round(height * 0.86), 820, 1160)
+  }
+}
+
+function getResponsiveZoomFactor(width: number, height: number): number {
+  if (width >= 2400 && height >= 1350) return 1.14
+  if (width >= 1900 && height >= 1050) return 1.08
+  if (width <= 1200 || height <= 760) return 0.95
+  return 1
+}
+
+function applyResponsiveZoom(win: BrowserWindow): void {
+  const [width, height] = win.getContentSize()
+  win.webContents.setZoomFactor(getResponsiveZoomFactor(width, height))
 }
 
 function canonicalPath(filePath: string): string {
@@ -368,9 +392,12 @@ async function checkLicense(): Promise<'active' | 'revoked'> {
 }
 
 async function createWindow(): Promise<void> {
+  const initialBounds = getInitialWindowBounds()
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    width: initialBounds.width,
+    height: initialBounds.height,
+    minWidth: 1100,
+    minHeight: 720,
     show: true,
     autoHideMenuBar: true,
     webPreferences: {
@@ -380,6 +407,16 @@ async function createWindow(): Promise<void> {
       webSecurity: true,
       sandbox: true
     }
+  })
+
+  applyResponsiveZoom(mainWindow)
+  let zoomResizeTimer: ReturnType<typeof setTimeout> | null = null
+  mainWindow.on('resize', () => {
+    if (!mainWindow) return
+    if (zoomResizeTimer) clearTimeout(zoomResizeTimer)
+    zoomResizeTimer = setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) applyResponsiveZoom(mainWindow)
+    }, 150)
   })
 
   // Start Python backend
@@ -508,6 +545,7 @@ ipcMain.handle('show-save-dialog', async (_event, options: { defaultPath?: strin
 })
 
 ipcMain.handle('get-app-version', () => app.getVersion())
+ipcMain.handle('get-update-status', () => updateStatus)
 
 ipcMain.handle('check-for-updates', async () => {
   if (!app.isPackaged) {

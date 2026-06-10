@@ -30,6 +30,7 @@ export interface ElectronAPI {
   selectFile: (options: { filters?: { name: string; extensions: string[] }[]; properties?: ('openFile' | 'multiSelections')[] }) => Promise<{ canceled: boolean; filePaths: string[] }>
   showSaveDialog: (options: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) => Promise<{ canceled: boolean; filePath?: string; exportPathToken?: string }>
   getAppVersion: () => Promise<string>
+  getUpdateStatus: () => Promise<AppUpdateStatus>
   checkForUpdates: () => Promise<AppUpdateStatus>
   installUpdate: () => Promise<{ success: boolean; error?: string }>
   onUpdateStatus: (callback: (status: AppUpdateStatus) => void) => () => void
@@ -45,6 +46,7 @@ const api: ElectronAPI = {
   selectFile: (options) => ipcRenderer.invoke('select-file', options),
   showSaveDialog: (options) => ipcRenderer.invoke('show-save-dialog', options),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  getUpdateStatus: () => ipcRenderer.invoke('get-update-status'),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   installUpdate: () => ipcRenderer.invoke('install-update'),
   onUpdateStatus: (callback) => {
