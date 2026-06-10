@@ -77,6 +77,19 @@ function bestNameColumnMatch(headers: string[]): string | null {
   return headers[0] ?? null
 }
 
+function rowToStringArray(row: unknown[]): string[] {
+  return row.map((cell) => String(cell ?? '').trim())
+}
+
+function rowsToObjects(rows: unknown[][], headerRow: number, generatedColumns: string[]): Record<string, unknown>[] {
+  if (headerRow === -1) {
+    return rows.map((row) => Object.fromEntries(generatedColumns.map((col, index) => [col, row[index] ?? ''])))
+  }
+
+  const headers = rowToStringArray(rows[headerRow] ?? []).filter(Boolean)
+  return rows.slice(headerRow + 1).map((row) => Object.fromEntries(headers.map((col, index) => [col, row[index] ?? ''])))
+}
+
 function FileDropContainer({
   dropzone,
   label,
@@ -281,7 +294,8 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
           const wb = XLSX.read(text, { type: 'string' })
           const ws = wb.Sheets[wb.SheetNames[0]]
           if (ws) {
-            rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as Record<string, unknown>[]
+            const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][]
+            rows = rowsToObjects(rawRows, headerRow, detectedColumns)
           }
         }
 
@@ -297,13 +311,14 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
         setAvailableApCodes(Array.from(codes).sort())
       } catch (e) {
         console.error('[FileDropZone] Failed to parse AP codes:', e)
-        setAvailableApCodes([])
+        if (!cancelled) setAvailableApCodes([])
+      } finally {
+        if (!cancelled) setApCodeLoading(false)
       }
-      setApCodeLoading(false)
     }
     fn()
     return () => { cancelled = true }
-  }, [clientListFile, apCodeColumn, sheetName, apCodeEnabled, excelWorkbook])
+  }, [clientListFile, apCodeColumn, sheetName, apCodeEnabled, excelWorkbook, headerRow, detectedColumns])
 
   // Validate PDF headers
   useEffect(() => {
@@ -374,40 +389,57 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
       setHeaderRow(0)
       const reader = new FileReader()
       reader.onload = (e) => {
-        const text = String(e.target?.result || '')
-        const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '')
-        const firstRows = lines.slice(0, 10).map((line) =>
-          line.split(',').map((h) => h.trim().replace(/^["']|["']$/g, ''))
-        )
-        setCsvFirstRows(firstRows)
+        try {
+          const text = String(e.target?.result || '')
+          const workbook = XLSX.read(text, { type: 'string' })
+          const ws = workbook.Sheets[workbook.SheetNames[0]]
+          const rows = ws ? XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][] : []
+          setCsvFirstRows(rows.slice(0, 10).map(rowToStringArray))
+        } catch (error) {
+          console.error('[FileDropZone] Failed to parse CSV headers:', error)
+          setCsvFirstRows([])
+          setDetectedColumns([])
+        }
       }
-      reader.readAsText(clientListFile.slice(0, 16384))
+      reader.readAsText(clientListFile)
       return
     }
 
     if (isExcel(clientListFile)) {
       const reader = new FileReader()
       reader.onload = (e) => {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer)
-        const workbook = XLSX.read(data, { type: 'array' })
-        setExcelWorkbook(workbook)
-        const sheets = workbook.SheetNames
-        setSheetNames(sheets)
+        try {
+          const data = new Uint8Array(e.target?.result as ArrayBuffer)
+          const workbook = XLSX.read(data, { type: 'array' })
+          setExcelWorkbook(workbook)
+          const sheets = workbook.SheetNames
+          setSheetNames(sheets)
 
-        if (sheets.length > 0) {
-          const firstSheet = sheets[0]
-          setSheetName(firstSheet)
-          const ws = workbook.Sheets[firstSheet]
-          const headers = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as string[][]
-          if (headers.length > 0) {
-            const cols = headers[0].map((h) => String(h).trim()).filter(Boolean)
-            setDetectedColumns(cols)
-            const best = bestNameColumnMatch(cols)
-            if (best) setNameColumn(best)
+          if (sheets.length > 0) {
+            const firstSheet = sheets[0]
+            setSheetName(firstSheet)
+            const ws = workbook.Sheets[firstSheet]
+            const headers = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][]
+            if (headers.length > 0) {
+              const cols = rowToStringArray(headers[0]).filter(Boolean)
+              setDetectedColumns(cols)
+              const best = bestNameColumnMatch(cols)
+              if (best) setNameColumn(best)
+            }
           }
+        } catch (error) {
+          console.error('[FileDropZone] Failed to parse Excel client list:', error)
+          setExcelWorkbook(null)
+          setSheetNames([])
+          setDetectedColumns([])
         }
       }
-      reader.readAsArrayBuffer(clientListFile.slice(0, 2 * 1024 * 1024))
+      reader.onerror = () => {
+        console.error('[FileDropZone] Failed to read Excel client list.')
+        setSheetNames([])
+        setDetectedColumns([])
+      }
+      reader.readAsArrayBuffer(clientListFile)
     }
   }, [clientListFile])
 

@@ -103,6 +103,14 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
+      - name: Run release readiness gate
+        env:
+          UPDATE_FEED_URL: https://github.com/${{ github.repository }}/releases/download/${{ needs.validate.outputs.tag }}
+          LICENSE_CHECK_URL: https://the-ska-auditing-app.vercel.app/api/license
+          ALLOW_UNSIGNED_RELEASE: "1"
+          RELEASE_PLATFORM: ${{ matrix.platform }}
+        run: bun run release:check
+
       # Python venv — Windows uses pwsh, others use bash
       - name: Create Python virtual environment (Windows)
         if: matrix.platform == 'windows'
@@ -120,27 +128,10 @@ jobs:
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/python -m pip install -r backend/requirements.txt pytest pyinstaller
 
-      - name: Typecheck frontend and Electron
-        run: bun run typecheck
-
-      - name: Run backend tests (Windows)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: .\.venv\Scripts\python.exe -m pytest backend\tests
-
-      - name: Run backend tests (Unix)
-        if: matrix.platform != 'windows'
-        shell: bash
-        run: .venv/bin/python -m pytest backend/tests
-
-      - name: Build app
-        run: bun run build
-
-      - name: Build Python backend
-        shell: bash
+      - name: Run production verification
         env:
           PYTHON: ${{ matrix.platform == 'windows' && '.venv\\Scripts\\python.exe' || '.venv/bin/python' }}
-        run: bun run build:python
+        run: bun run verify:prod
 
       - name: Build platform installer
         env:
@@ -186,14 +177,3 @@ jobs:
             artifacts/**/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Copy release manifests for update site
-        shell: bash
-        run: |
-          mkdir -p site/public/releases
-          for f in artifacts/latest*.yml; do
-            if [ -f "$f" ]; then
-              cp "$f" site/public/releases/
-              echo "Copied $(basename $f) to site/public/releases/"
-            fi
-          done

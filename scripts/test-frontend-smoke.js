@@ -48,6 +48,24 @@ function main() {
   assert(main.includes('AUDIT_DISABLE_DOCS'), 'Packaged backend docs must be disabled')
   assert(main.includes('validatedExternalUrl'), 'Packaged external update/license URLs must be validated')
   assert(main.includes("url.protocol !== 'https:'"), 'Packaged external URLs must require HTTPS')
+  assert(main.includes("execFileSync('taskkill'"), 'Windows backend shutdown must use taskkill for process trees')
+  assert(main.includes('requestSingleInstanceLock'), 'Electron app must enforce a single instance')
+
+  const fileDropZone = read('frontend/src/components/FileDropZone.tsx')
+  assert(fileDropZone.includes("XLSX.read(text, { type: 'string' })"), 'CSV headers must be parsed with XLSX, not naive comma splitting')
+  assert(fileDropZone.includes('rowsToObjects(rawRows, headerRow, detectedColumns)'), 'AP-code extraction must respect selected CSV header row')
+  assert(fileDropZone.includes('reader.readAsArrayBuffer(clientListFile)'), 'Excel client-list parsing must read the whole workbook')
+  assert(!fileDropZone.includes('clientListFile.slice(0, 2 * 1024 * 1024)'), 'Excel client-list parsing must not truncate workbooks')
+
+  const releaseGate = read('scripts/check-release-readiness.js')
+  assert(releaseGate.includes('icon\\.ico'), 'Release gate must allow the tracked Windows icon')
+  assert(releaseGate.includes('entitlements\\.mac\\.plist'), 'Release gate must allow tracked macOS entitlements')
+  assert(releaseGate.includes('/^resources\\/python-dist\\//'), 'Release gate must still block generated Python bundles')
+
+  const releaseWorkflow = read('.github/workflows/release.yml')
+  assert(releaseWorkflow.includes('Run release readiness gate'), 'Release workflow must run the release readiness gate')
+  assert(releaseWorkflow.includes('Run production verification'), 'Release workflow must run full production verification')
+  assert(!releaseWorkflow.includes('Copy release manifests for update site'), 'Release workflow must not contain obsolete manifest-copy step')
 
   const preload = read('frontend/electron/preload.ts')
   assert(preload.includes('contextBridge.exposeInMainWorld'), 'Preload must expose a narrow bridge')
