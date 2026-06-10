@@ -98,15 +98,30 @@ export async function GET(
     } else {
       // Never proxy large binaries through Vercel/Next.js. Streaming .exe files here can
       // truncate or alter the response, which causes NSIS integrity errors on Windows.
-      // Let GitHub handle the binary download directly.
-      if (!asset.browser_download_url) {
-        return NextResponse.json(
-          { error: `Asset "${requestedFile}" has no download URL` },
-          { status: 502 }
-        );
+      // For a private repo, use the server-side token only to obtain GitHub's temporary
+      // signed binary URL, then redirect the browser there. The token is never exposed.
+      const assetRes = await fetch(
+        `https://api.github.com/repos/Aditya190803/audit-app/releases/assets/${asset.id}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/octet-stream",
+          },
+          redirect: "manual",
+        }
+      );
+
+      if (assetRes.status === 302 || assetRes.status === 307) {
+        const signedUrl = assetRes.headers.get("location");
+        if (signedUrl) {
+          return NextResponse.redirect(signedUrl, 307);
+        }
       }
 
-      return NextResponse.redirect(asset.browser_download_url, 307);
+      return NextResponse.json(
+        { error: `Failed to create signed download URL: ${assetRes.status} ${assetRes.statusText}` },
+        { status: 502 }
+      );
     }
   } catch (error: unknown) {
     return NextResponse.json(
