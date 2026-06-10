@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog, session, screen } from 'electron'
-import { spawn } from 'node:child_process'
+import { spawn, execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import getPort from 'get-port'
@@ -359,19 +359,32 @@ async function startPythonBackend(port: number): Promise<void> {
 
 function stopPythonBackend(): void {
   const proc = pythonProcess
-  if (!proc) return
+  if (!proc || !proc.pid) return
 
   console.log('[Main] Stopping Python backend...')
-  proc.kill('SIGTERM')
 
-  const killTimeout = setTimeout(() => {
-    if (pythonProcess === proc) {
-      console.warn('[Main] Python backend did not exit after SIGTERM; sending SIGKILL.')
-      proc.kill('SIGKILL')
+  if (process.platform === 'win32') {
+    // On Windows, SIGTERM is silently ignored by Node.js child processes.
+    // Use taskkill /F /T to forcefully kill the entire process tree,
+    // including ProcessPoolExecutor worker subprocesses.
+    try {
+      execFileSync('taskkill', ['/F', '/T', '/PID', String(proc.pid)], { stdio: 'ignore' })
+    } catch {
+      // taskkill may fail if the process already exited — that's fine
+      console.warn('[Main] taskkill failed (process may have already exited).')
     }
-  }, 3000)
+  } else {
+    proc.kill('SIGTERM')
 
-  proc.once('exit', () => clearTimeout(killTimeout))
+    const killTimeout = setTimeout(() => {
+      if (pythonProcess === proc) {
+        console.warn('[Main] Python backend did not exit after SIGTERM; sending SIGKILL.')
+        proc.kill('SIGKILL')
+      }
+    }, 3000)
+
+    proc.once('exit', () => clearTimeout(killTimeout))
+  }
 }
 
 async function checkLicense(): Promise<'active' | 'revoked'> {
@@ -577,8 +590,12 @@ ipcMain.handle('install-update', async () => {
   return { success: true }
 })
 
-app.on('window-all-closed', () => {
+// Ensure backend is stopped on any quit path (installer-triggered, update, manual close)
+app.on('before-quit', () => {
   stopPythonBackend()
+})
+
+app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
@@ -588,20 +605,33 @@ app.on('window-all-closed', () => {
 app.commandLine.appendSwitch('disable-gpu-vsync')
 app.commandLine.appendSwitch('ignore-gpu-blocklist')
 
-app.whenReady().then(() => {
-  installContentSecurityPolicy()
-  return createWindow().then(() => {
-    // Auto-check for updates 5s after window is ready
-    if (app.isPackaged) {
-      setTimeout(() => {
-        configureUpdates()
-        autoUpdater.checkForUpdates().catch((err) => {
-          console.error('[Main] Auto-update check failed:', err)
-        })
-      }, 5000)
+// Prevent multiple instances — required for NSIS installer to close the app cleanly
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.focus()
     }
   })
-})
+
+  app.whenReady().then(() => {
+    installContentSecurityPolicy()
+    return createWindow().then(() => {
+      // Auto-check for updates 5s after window is ready
+      if (app.isPackaged) {
+        setTimeout(() => {
+          configureUpdates()
+          autoUpdater.checkForUpdates().catch((err) => {
+            console.error('[Main] Auto-update check failed:', err)
+          })
+        }, 5000)
+      }
+    })
+  })
+}
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {

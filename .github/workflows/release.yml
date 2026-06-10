@@ -110,7 +110,7 @@ jobs:
         run: |
           python -m venv .venv
           .\.venv\Scripts\python.exe -m pip install --upgrade pip
-          .\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt pytest
+          .\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt pytest pyinstaller
 
       - name: Create Python virtual environment (Unix)
         if: matrix.platform != 'windows'
@@ -118,7 +118,7 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/python -m pip install -r backend/requirements.txt pytest
+          .venv/bin/python -m pip install -r backend/requirements.txt pytest pyinstaller
 
       - name: Typecheck frontend and Electron
         run: bun run typecheck
@@ -137,6 +137,9 @@ jobs:
         run: bun run build
 
       - name: Build Python backend
+        shell: bash
+        env:
+          PYTHON: ${{ matrix.platform == 'windows' && '.venv\\Scripts\\python.exe' || '.venv/bin/python' }}
         run: bun run build:python
 
       - name: Build platform installer

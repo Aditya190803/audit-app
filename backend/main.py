@@ -1,3 +1,4 @@
+from multiprocessing import freeze_support
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -5,6 +6,9 @@ from contextlib import asynccontextmanager
 import uvicorn
 import os
 import sys
+
+# Required for PyInstaller on Windows — must be called before any multiprocessing usage
+freeze_support()
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
