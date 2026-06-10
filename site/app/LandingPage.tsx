@@ -52,7 +52,7 @@ function getPlatformInfo(version: string) {
           label: "Download for Windows (ARM64)",
           fileName: `Bank.Audit.App.Setup.${version}-arm64.exe`,
           format: ".exe installer",
-          available: false,
+          available: true,
         },
       },
     },

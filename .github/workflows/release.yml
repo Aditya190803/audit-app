@@ -82,6 +82,41 @@ jobs:
             python-arch: x64
             artifact-glob: "out/dist/*.exe\nout/dist/*.blockmap\nout/dist/latest.yml"
 
+          - os: windows-11-arm
+            name: Windows-arm64
+            platform: windows
+            build-flag: --win --arm64
+            python-arch: arm64
+            artifact-glob: "out/dist/*.exe\nout/dist/*.blockmap\nout/dist/latest.yml"
+
+          - os: macos-13
+            name: macOS-x64
+            platform: macos
+            build-flag: --mac --x64
+            python-arch: x64
+            artifact-glob: "out/dist/*.dmg\nout/dist/*.blockmap\nout/dist/latest-mac.yml"
+
+          - os: macos-latest
+            name: macOS-arm64
+            platform: macos
+            build-flag: --mac --arm64
+            python-arch: arm64
+            artifact-glob: "out/dist/*.dmg\nout/dist/*.blockmap\nout/dist/latest-mac.yml"
+
+          - os: ubuntu-latest
+            name: Linux-x64
+            platform: linux
+            build-flag: --linux --x64
+            python-arch: x64
+            artifact-glob: "out/dist/*.AppImage\nout/dist/latest-linux.yml"
+
+          - os: ubuntu-24.04-arm
+            name: Linux-arm64
+            platform: linux
+            build-flag: --linux --arm64
+            python-arch: arm64
+            artifact-glob: "out/dist/*.AppImage\nout/dist/latest-linux.yml"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
