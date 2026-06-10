@@ -81,24 +81,6 @@ jobs:
             build-flag: --win --x64
             python-arch: x64
             artifact-glob: "out/dist/*.exe\nout/dist/*.blockmap\nout/dist/latest.yml"
-          - os: macos-latest
-            name: macOS
-            platform: macos
-            build-flag: --mac --x64 --arm64
-            python-arch: arm64
-            artifact-glob: "out/dist/*.dmg\nout/dist/*.blockmap\nout/dist/latest-mac.yml"
-          - os: ubuntu-latest
-            name: Linux-x64
-            platform: linux
-            build-flag: --linux --x64
-            python-arch: x64
-            artifact-glob: "out/dist/*.AppImage\nout/dist/latest-linux.yml"
-          - os: ubuntu-24.04-arm
-            name: Linux-arm64
-            platform: linux
-            build-flag: --linux --arm64
-            python-arch: arm64
-            artifact-glob: "out/dist/*.AppImage\nout/dist/latest-linux.yml"
 
     steps:
       - name: Checkout

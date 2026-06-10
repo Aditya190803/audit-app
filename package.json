@@ -1,6 +1,6 @@
 {
   "name": "bank-audit-app",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "Bank Statement Auditing App",
   "main": "./out/main/main.js",
   "author": "SKA Auditing",
@@ -97,6 +97,7 @@
       "allowToChangeInstallationDirectory": true,
       "unicode": true,
       "differentialPackage": false,
+      "useZip": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Bank Audit App",
