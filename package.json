@@ -1,6 +1,6 @@
 {
   "name": "bank-audit-app",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Bank Statement Auditing App",
   "main": "./out/main/main.js",
   "author": "SKA Auditing",
@@ -88,7 +88,21 @@
       "url": "${env.UPDATE_FEED_URL}"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "sign": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "unicode": true,
+      "differentialPackage": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Bank Audit App",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
     },
     "mac": {
       "target": "dmg",

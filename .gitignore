@@ -36,6 +36,8 @@ venv/
 ENV/
 build/*
 !build/icon.png
+!build/icon.svg
+!build/icon.ico
 !build/entitlements.mac.plist
 develop-eggs/
 dist/
