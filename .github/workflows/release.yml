@@ -81,12 +81,6 @@ jobs:
             build-flag: --win --x64
             python-arch: x64
             artifact-glob: "out/dist/*.exe\nout/dist/*.blockmap\nout/dist/latest.yml"
-          - os: windows-11-arm
-            name: Windows-arm64
-            platform: windows
-            build-flag: --win --arm64
-            python-arch: x64
-            artifact-glob: "out/dist/*.exe\nout/dist/*.blockmap\nout/dist/latest.yml"
           - os: macos-latest
             name: macOS
             platform: macos
