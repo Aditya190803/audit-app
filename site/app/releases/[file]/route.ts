@@ -53,12 +53,12 @@ export async function GET(
     // 2. Find asset matching the requested filename. Electron Builder outputs
     // dot-separated names, but browsers/users may request space-separated names.
     const normalizedRequest = normalizeAssetName(requestedFile);
-    const asset = assets.find((a: { name: string; id: number }) => {
-      return (
+    const asset = assets.find(
+      (a: { name: string; id: number; browser_download_url?: string }) => (
         a.name.toLowerCase() === requestedFile.toLowerCase() ||
         normalizeAssetName(a.name) === normalizedRequest
-      );
-    });
+      )
+    );
 
     if (!asset) {
       return NextResponse.json(
@@ -96,43 +96,17 @@ export async function GET(
         },
       });
     } else {
-      // Redirect binaries to pre-signed S3 URLs to save bandwidth and prevent Vercel timeouts
-      const assetRes = await fetch(
-        `https://api.github.com/repos/Aditya190803/audit-app/releases/assets/${asset.id}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: "application/octet-stream",
-          },
-          redirect: "manual",
-        }
-      );
-
-      if (assetRes.status === 302 || assetRes.status === 307) {
-        const s3Url = assetRes.headers.get("location");
-        if (s3Url) {
-          return NextResponse.redirect(s3Url, 307);
-        }
-      }
-
-      if (!assetRes.ok || !assetRes.body) {
+      // Never proxy large binaries through Vercel/Next.js. Streaming .exe files here can
+      // truncate or alter the response, which causes NSIS integrity errors on Windows.
+      // Let GitHub handle the binary download directly.
+      if (!asset.browser_download_url) {
         return NextResponse.json(
-          { error: `Failed to fetch binary asset: ${assetRes.status} ${assetRes.statusText}` },
+          { error: `Asset "${requestedFile}" has no download URL` },
           { status: 502 }
         );
       }
 
-      // Fallback: stream only when GitHub returned the binary body successfully.
-      // Never stream GitHub error JSON as an .exe; that produces broken downloads.
-      const headers = new Headers({
-        "Content-Type": assetRes.headers.get("Content-Type") || "application/octet-stream",
-        "Content-Disposition": `attachment; filename="${asset.name.replace(/"/g, "")}"`,
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-      });
-      const contentLength = assetRes.headers.get("Content-Length");
-      if (contentLength) headers.set("Content-Length", contentLength);
-
-      return new Response(assetRes.body, { headers });
+      return NextResponse.redirect(asset.browser_download_url, 307);
     }
   } catch (error: unknown) {
     return NextResponse.json(
