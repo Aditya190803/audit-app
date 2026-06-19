@@ -322,18 +322,11 @@ workflows:
             tags:
               only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
 
-      - build-macos-arm64:
-          requires: [validate]
-          filters:
-            tags:
-              only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
-
-      - build-macos-x64:
-          # Sequential after arm64 to respect CircleCI's macOS concurrency limit (usually 1 on free/performance plans).
-          requires: [validate, build-macos-arm64]
-          filters:
-            tags:
-              only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
+      # macOS builds temporarily removed for this release
+      # (hitting CircleCI macOS concurrency limit)
+      # Re-enable by restoring the two build-macos-* entries + updating publish requires
+      # - build-macos-arm64: ...
+      # - build-macos-x64: ...
 
       - build-linux:
           requires: [validate]
@@ -342,7 +335,7 @@ workflows:
               only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
 
       - publish:
-          requires: [build-windows, build-linux, build-macos-arm64, build-macos-x64]
+          requires: [build-windows, build-linux]
           context: [github-release]
           filters:
             tags:
