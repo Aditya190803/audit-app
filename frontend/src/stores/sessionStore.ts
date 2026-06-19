@@ -102,7 +102,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const sse = { source: null as EventSource | null }
     const startSse = async () => {
       try {
-        const { getBackendPort, getBackendConfig } = (window as any).electronAPI ?? {}
+        const { getBackendPort, getBackendConfig } = window.electronAPI ?? {}
         let port = 8765
         let token = ''
         if (getBackendConfig) {
@@ -148,10 +148,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           : null
       }))
       return sessionId
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('Failed to process files:', e)
       sse.source?.close()
-      const msg = e?.response?.data?.detail || e?.message || 'Processing failed. Check the PDF is valid and not encrypted.'
+      let msg = 'Processing failed. Check the PDF is valid and not encrypted.'
+      if (e && typeof e === 'object') {
+        const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
+        const message = (e as { message?: string }).message
+        if (detail) msg = detail
+        else if (message) msg = message
+      }
       set((state) => ({
         isProcessing: false,
         processingError: msg,

@@ -1,0 +1,284 @@
+version: 2.1
+
+# ── Orbs ──────────────────────────────────────────────────────
+orbs:
+  gh: circleci/github-cli@2.4
+
+# ── Parameters (manual trigger via CircleCI API) ──────────────
+parameters:
+  release-tag:
+    type: string
+    default: ""
+
+# ── Shared command: Node + Bun + Python ──────────────────────
+commands:
+  setup-bun:
+    steps:
+      - run:
+          name: Install Bun
+          command: |
+            curl -fsSL https://bun.sh/install | bash
+            echo 'export BUN_INSTALL="$HOME/.bun"' >> $BASH_ENV
+            echo 'export PATH="$BUN_INSTALL/bin:$PATH"' >> $BASH_ENV
+
+  install-deps:
+    steps:
+      - setup-bun
+      - run:
+          name: Install frontend dependencies
+          command: |
+            source $BASH_ENV
+            bun install --frozen-lockfile
+
+# ── Jobs ──────────────────────────────────────────────────────
+jobs:
+  validate:
+    docker:
+      - image: cimg/node:22.14
+    steps:
+      - checkout
+      - run:
+          name: Resolve & validate release tag
+          command: |
+            TAG="${CIRCLE_TAG:-${RELEASE_TAG:-}}"
+            if [ -z "$TAG" ]; then
+              echo "No tag provided — set CIRCLE_TAG (tag push) or pass release-tag parameter." >&2
+              exit 1
+            fi
+            if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Tag must be vX.Y.Z, got: $TAG" >&2
+              exit 1
+            fi
+            VERSION="${TAG#v}"
+            PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+            if [ "$VERSION" != "$PACKAGE_VERSION" ]; then
+              echo "Tag $TAG doesn't match package.json version $PACKAGE_VERSION" >&2
+              exit 1
+            fi
+            echo "export RELEASE_TAG=$TAG" >> $BASH_ENV
+            echo "export RELEASE_VERSION=$VERSION" >> $BASH_ENV
+      - persist_to_workspace:
+          root: .
+          paths:
+            - .
+
+  build-windows:
+    machine:
+      image: windows-server-2025-gpu:2025-05-01
+      resource_class: windows.medium
+    environment:
+      ALLOW_UNSIGNED_RELEASE: "1"
+      RELEASE_PLATFORM: windows
+    steps:
+      - attach_workspace:
+          at: .
+      - install-deps
+      - run:
+          name: Install Python 3.12
+          command: |
+            winget install --id Python.Python.3.12 --silent --accept-package-agreements
+            echo "C:\Python312" >> $env:GITHUB_PATH
+            echo "C:\Python312\Scripts" >> $env:GITHUB_PATH
+            python --version
+      - run:
+          name: Create Python venv & install deps
+          shell: powershell.exe
+          command: |
+            python -m venv .venv
+            .\.venv\Scripts\python.exe -m pip install --upgrade pip
+            .\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt pytest pyinstaller
+      - run:
+          name: Production verification
+          command: |
+            $env:PYTHON = "$pwd\\.venv\\Scripts\\python.exe"
+            $env:UPDATE_FEED_URL = "https://github.com/$env:CIRCLE_PROJECT_USERNAME/$env:CIRCLE_PROJECT_REPONAME/releases/download/$env:RELEASE_TAG"
+            $env:LICENSE_CHECK_URL = "https://the-ska-auditing-app.vercel.app/api/license"
+            bun run verify:prod
+      - run:
+          name: Build Windows installer
+          command: |
+            $env:GH_TOKEN = "$env:GITHUB_TOKEN"
+            $env:UPDATE_FEED_URL = "https://github.com/$env:CIRCLE_PROJECT_USERNAME/$env:CIRCLE_PROJECT_REPONAME/releases/download/$env:RELEASE_TAG"
+            bunx electron-builder --win --x64 --publish never
+      - store_artifacts:
+          path: out/dist
+      - persist_to_workspace:
+          root: .
+          paths:
+            - out/dist
+
+  build-macos-arm64:
+    macos:
+      xcode: "16.2.0"
+    resource_class: macos.m1.medium.gen1
+    environment:
+      ALLOW_UNSIGNED_RELEASE: "1"
+      RELEASE_PLATFORM: mac
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - attach_workspace:
+          at: .
+      - install-deps
+      - run:
+          name: Create Python venv & install deps
+          command: |
+            python3 -m venv .venv
+            .venv/bin/python -m pip install --upgrade pip
+            .venv/bin/python -m pip install -r backend/requirements.txt pytest pyinstaller
+      - run:
+          name: Production verification
+          command: |
+            export PYTHON=".venv/bin/python"
+            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$RELEASE_TAG"
+            export LICENSE_CHECK_URL="https://the-ska-auditing-app.vercel.app/api/license"
+            bun run verify:prod
+      - run:
+          name: Build macOS arm64 (Apple Silicon)
+          command: |
+            export GH_TOKEN="$GITHUB_TOKEN"
+            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$RELEASE_TAG"
+            bunx electron-builder --mac --arm64 --publish never
+      - store_artifacts:
+          path: out/dist
+      - persist_to_workspace:
+          root: .
+          paths:
+            - out/dist
+
+  build-macos-x64:
+    macos:
+      xcode: "16.2.0"
+    resource_class: macos.m1.medium.gen1
+    environment:
+      ALLOW_UNSIGNED_RELEASE: "1"
+      RELEASE_PLATFORM: mac
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - attach_workspace:
+          at: .
+      - install-deps
+      - run:
+          name: Create Python venv & install deps
+          command: |
+            python3 -m venv .venv
+            .venv/bin/python -m pip install --upgrade pip
+            .venv/bin/python -m pip install -r backend/requirements.txt pytest pyinstaller
+      - run:
+          name: Production verification
+          command: |
+            export PYTHON=".venv/bin/python"
+            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$RELEASE_TAG"
+            export LICENSE_CHECK_URL="https://the-ska-auditing-app.vercel.app/api/license"
+            bun run verify:prod
+      - run:
+          name: Build macOS x64 (Intel — cross-compile)
+          command: |
+            export GH_TOKEN="$GITHUB_TOKEN"
+            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$RELEASE_TAG"
+            bunx electron-builder --mac --x64 --publish never
+      - store_artifacts:
+          path: out/dist
+      - persist_to_workspace:
+          root: .
+          paths:
+            - out/dist
+
+  build-linux:
+    docker:
+      - image: cimg/python:3.12-node
+    environment:
+      ALLOW_UNSIGNED_RELEASE: "1"
+      RELEASE_PLATFORM: linux
+    steps:
+      - attach_workspace:
+          at: .
+      - install-deps
+      - run:
+          name: Create Python venv & install deps
+          command: |
+            python -m venv .venv
+            .venv/bin/python -m pip install --upgrade pip
+            .venv/bin/python -m pip install -r backend/requirements.txt pytest pyinstaller
+      - run:
+          name: Production verification
+          command: |
+            export PYTHON=".venv/bin/python"
+            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$RELEASE_TAG"
+            export LICENSE_CHECK_URL="https://the-ska-auditing-app.vercel.app/api/license"
+            bun run verify:prod
+      - run:
+          name: Build Linux AppImage
+          command: |
+            export GH_TOKEN="$GITHUB_TOKEN"
+            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$RELEASE_TAG"
+            bunx electron-builder --linux --x64 --publish never
+      - store_artifacts:
+          path: out/dist
+      - persist_to_workspace:
+          root: .
+          paths:
+            - out/dist
+
+  publish:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - attach_workspace:
+          at: .
+      - gh/setup
+      - run:
+          name: Create GitHub Release & upload assets
+          command: |
+            # Create the release
+            gh release create "$RELEASE_TAG" \
+              --title "Bank Audit App $RELEASE_VERSION" \
+              --generate-notes
+
+            # Upload all platform artifacts
+            gh release upload "$RELEASE_TAG" out/dist/* --clobber
+
+# ── Workflows ─────────────────────────────────────────────────
+workflows:
+  release:
+    when:
+      matches:
+        pattern: "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+        value: << pipeline.git.tag >>
+    jobs:
+      - validate:
+          filters:
+            tags:
+              only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
+            branches:
+              ignore: /.*/
+
+      - build-windows:
+          requires: [validate]
+          filters:
+            tags:
+              only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
+
+      - build-macos-arm64:
+          requires: [validate]
+          filters:
+            tags:
+              only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
+
+      - build-macos-x64:
+          requires: [validate]
+          filters:
+            tags:
+              only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
+
+      - build-linux:
+          requires: [validate]
+          filters:
+            tags:
+              only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
+
+      - publish:
+          requires: [build-windows, build-linux, build-macos-arm64, build-macos-x64]
+          context: [github-release]
+          filters:
+            tags:
+              only: /^v[0-9]+\.[0-9]+\.[0-9]+$/

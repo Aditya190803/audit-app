@@ -90,7 +90,8 @@
     },
     "win": {
       "target": "nsis",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "_win_signing_note": "signAndEditExecutable is false because signing is handled by CI (CSC_LINK/WIN_CSC_LINK). Set to true only when the signing certificate is available at build time."
     },
     "nsis": {
       "oneClick": false,

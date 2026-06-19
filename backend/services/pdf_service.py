@@ -10,8 +10,12 @@ from backend.services.process_pool import get_process_pool
 
 class PDFService:
     def __init__(self, tesseract_path: Optional[str] = None):
+        self.last_warnings: list[str] = []
         if tesseract_path and os.path.exists(tesseract_path):
             pytesseract.pytesseract.tesseract_cmd = tesseract_path
+
+    def _warn(self, message: str) -> None:
+        self.last_warnings.append(message)
     
     def extract_text(self, pdf_path: str, password: Optional[str] = None,
                      progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Dict[str, Any]]:
@@ -35,6 +39,7 @@ class PDFService:
             try:
                 pages.append(future.result())
             except Exception as e:
+                self._warn(f"Text extraction failed on page {futures[future] + 1}: {e}")
                 print(f"[PDFService] Error processing page text: {e}")
             if progress_callback:
                 progress_callback(i + 1, num_pages)
@@ -62,6 +67,7 @@ class PDFService:
             try:
                 tables.extend(future.result())
             except Exception as e:
+                self._warn(f"Table extraction failed on page {futures[future] + 1}: {e}")
                 print(f"[PDFService] Error processing page tables: {e}")
             if progress_callback:
                 progress_callback(i + 1, num_pages)
@@ -74,6 +80,7 @@ class PDFService:
                            progress_callback: Optional[Callable[[str, int, int], None]] = None) -> List[Dict[str, Any]]:
         """Parse transactions from PDF using the parser registry."""
         from backend.services.parsers import registry
+        self.last_warnings = []
         def table_progress(done: int, total: int):
             if progress_callback:
                 progress_callback("tables", done, total)
@@ -105,6 +112,7 @@ class PDFService:
                     if transactions:
                         return transactions
                 except Exception as e:
+                    self._warn(f"Parser {p.display_name} failed and fallback was attempted: {e}")
                     print(f"[PDFService] Parser {p.name} failed: {e}")
                     continue
 
@@ -114,8 +122,10 @@ class PDFService:
                 if transactions:
                     return transactions
             except Exception as e:
+                self._warn(f"Generic parser failed: {e}")
                 print(f"[PDFService] Generic parser also failed: {e}")
 
+            self._warn("No transactions were detected by any parser")
             return []
 
         try:
@@ -124,14 +134,18 @@ class PDFService:
                 generic = registry.get_by_name("generic")
                 transactions = generic.parse(tables, pages)
         except Exception as e:
+            self._warn(f"Parser {parser.display_name} failed and generic fallback was attempted: {e}")
             print(f"[PDFService] Parser {parser.name} failed: {e}")
             generic = registry.get_by_name("generic")
             try:
                 transactions = generic.parse(tables, pages)
             except Exception as e2:
+                self._warn(f"Generic parser failed: {e2}")
                 print(f"[PDFService] Generic parser also failed: {e2}")
                 transactions = []
 
+        if not transactions:
+            self._warn("No transactions were detected by the selected parser")
         return transactions
 
     def get_page_count(self, pdf_path: str, password: Optional[str] = None) -> int:

@@ -1,7 +1,14 @@
+import asyncio
+import json
+import os
+import time
+
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional
+
 from backend.database import get_db
 from backend.schemas import (
     TransactionNotesUpdate,
@@ -15,61 +22,32 @@ from backend.services.tagging_service import TaggingService
 from backend.services.config_service import ConfigService
 from backend.services.audit_service import AuditService
 from backend.services.payment_method import detect_payment_method
-import os
-import json
-import time
-import uuid
-from pathlib import Path
-from threading import Lock
-import asyncio as _asyncio
+from backend.services.progress_service import ParseProgressStore
+from backend.services.upload_service import (
+    CLIENT_LIST_EXTENSIONS,
+    PDF_EXTENSIONS,
+    save_upload,
+)
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
-_progress_lock = Lock()
-_parse_progress = {}
-_progress_subscribers: dict[str, list[tuple[_asyncio.Queue, _asyncio.AbstractEventLoop]]] = {}
-
-PROGRESS_TTL = 3600  # 1 hour
 UPLOAD_DIR = os.path.abspath(os.environ.get("AUDIT_UPLOAD_DIR", "uploads"))
 MAX_UPLOAD_BYTES = int(os.environ.get("AUDIT_MAX_UPLOAD_BYTES", str(100 * 1024 * 1024)))
-PDF_EXTENSIONS = {".pdf"}
-CLIENT_LIST_EXTENSIONS = {".csv", ".xlsx", ".xls"}
+_progress_store = ParseProgressStore()
 
 def _set_parse_progress(progress_id: Optional[str], percent: int, message: str, stage: str = "processing", **extra):
-    if not progress_id:
-        return
-    now = time.time()
-    payload = {
-        "id": progress_id,
-        "percent": max(0, min(100, int(percent))),
-        "message": message,
-        "stage": stage,
-        "updated_at": now,
-        **extra,
-    }
-    with _progress_lock:
-        _parse_progress[progress_id] = payload
-        _cleanup_stale_progress(now)
-        subscribers = list(_progress_subscribers.get(progress_id, []))
-    # Push to all SSE subscribers (thread-safe via call_soon_threadsafe)
-    for q, loop in subscribers:
-        try:
-            loop.call_soon_threadsafe(q.put_nowait, payload)
-        except Exception:
-            pass  # queue full, loop closed, or wrong thread — skip
+    _progress_store.set(progress_id, percent, message, stage, **extra)
 
 def _get_parse_progress(progress_id: str):
-    with _progress_lock:
-        entry = _parse_progress.get(progress_id)
-        if entry and entry.get("stage") in ("complete", "error"):
-            del _parse_progress[progress_id]
-        return entry
+    return _progress_store.get(progress_id, consume_terminal=True)
 
-def _cleanup_stale_progress(now: float):
-    stale = [pid for pid, entry in _parse_progress.items()
-             if now - entry.get("updated_at", 0) > PROGRESS_TTL]
-    for pid in stale:
-        del _parse_progress[pid]
+def _save_upload_file(upload_file: UploadFile, allowed_extensions: set[str]) -> str:
+    return save_upload(
+        upload_file,
+        upload_dir=UPLOAD_DIR,
+        allowed_extensions=allowed_extensions,
+        max_bytes=MAX_UPLOAD_BYTES,
+    )
 
 @router.get("/parse-progress/{progress_id}")
 def get_parse_progress(progress_id: str):
@@ -83,19 +61,14 @@ def get_parse_progress(progress_id: str):
         }
     return progress
 
-from fastapi.responses import StreamingResponse
-import asyncio
+
 
 @router.get("/parse-progress/{progress_id}/stream")
 async def stream_parse_progress(progress_id: str):
     """SSE endpoint — push-based progress updates until complete or error."""
     loop = asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue(maxsize=200)
-    # Subscribe with the event loop reference for thread-safe push
-    with _progress_lock:
-        _progress_subscribers.setdefault(progress_id, []).append((q, loop))
-        # Send current state immediately if it exists
-        current = _parse_progress.get(progress_id)
+    current = _progress_store.subscribe(progress_id, q, loop)
     if current:
         await q.put(current)
 
@@ -110,8 +83,7 @@ async def stream_parse_progress(progress_id: str):
                     progress = await asyncio.wait_for(q.get(), timeout=2.0)
                 except asyncio.TimeoutError:
                     # No update pushed recently — check current state as fallback
-                    with _progress_lock:
-                        progress = _parse_progress.get(progress_id)
+                    progress = _progress_store.get(progress_id)
                     if progress is None:
                         progress = {"id": progress_id, "percent": 0, "message": "Waiting to start...", "stage": "queued"}
                     # Always send on timeout so client knows we're alive
@@ -143,14 +115,7 @@ async def stream_parse_progress(progress_id: str):
                     break
         finally:
             # Unsubscribe
-            with _progress_lock:
-                subs = _progress_subscribers.get(progress_id, [])
-                try:
-                    subs.remove((q, loop))
-                except ValueError:
-                    pass
-                if not subs:
-                    _progress_subscribers.pop(progress_id, None)
+            _progress_store.unsubscribe(progress_id, q, loop)
 
     return StreamingResponse(
         event_generator(),
@@ -219,32 +184,8 @@ async def parse_files(
             pass  # single password fallback
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     
-    def safe_save(upload_file: UploadFile, allowed_extensions: set[str]) -> str:
-        safe_name = Path(upload_file.filename or "file").name
-        ext = Path(safe_name).suffix.lower()
-        if ext not in allowed_extensions:
-            raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext or 'unknown'}")
-        unique_name = f"{uuid.uuid4().hex}{ext}"
-        dest = os.path.join(UPLOAD_DIR, unique_name)
-        written = 0
-        with open(dest, "wb") as f:
-            while True:
-                chunk = upload_file.file.read(1024 * 1024)
-                if not chunk:
-                    break
-                written += len(chunk)
-                if written > MAX_UPLOAD_BYTES:
-                    f.close()
-                    try:
-                        os.remove(dest)
-                    except OSError:
-                        pass
-                    raise HTTPException(status_code=413, detail=f"File too large: {safe_name}")
-                f.write(chunk)
-        return os.path.abspath(dest)
-    
     # Save client list
-    client_list_path = safe_save(client_list, CLIENT_LIST_EXTENSIONS)
+    client_list_path = _save_upload_file(client_list, CLIENT_LIST_EXTENSIONS)
     _set_parse_progress(progress_id, 5, "Reading client list...", "client_list")
     
     # Parse client list (CSV or Excel)
@@ -253,8 +194,11 @@ async def parse_files(
         csv_service.parse_client_list,
         client_list_path,
         sheet_name,
-        name_column
+        name_column,
+        True,
     )
+    if not clients:
+        raise HTTPException(status_code=400, detail="Client list did not contain any usable client names")
     _set_parse_progress(progress_id, 12, f"Loaded {len(clients)} clients.", "client_list")
     
     # Filter out excluded brokers if provided
@@ -290,10 +234,11 @@ async def parse_files(
     all_transactions = []
     pdf_paths = []
     page_offset = 0
+    parse_warnings = []
     
     for pdf_file in pdf:
         file_index = len(pdf_paths) + 1
-        pdf_path = safe_save(pdf_file, PDF_EXTENSIONS)
+        pdf_path = _save_upload_file(pdf_file, PDF_EXTENSIONS)
         _set_parse_progress(
             progress_id,
             12 + int((file_index - 1) / max(len(pdf), 1) * 48),
@@ -331,6 +276,8 @@ async def parse_files(
             )
 
         txns = await run_in_threadpool(pdf_service.parse_transactions, pdf_path, pdf_passwords.get(pdf_file.filename, password), bank_name, report_pdf_progress)
+        for warning in pdf_service.last_warnings:
+            parse_warnings.append(f"{pdf_file.filename}: {warning}")
         for tx in txns:
             if tx.get("page_number"):
                 tx["page_number"] += page_offset
@@ -396,22 +343,26 @@ async def parse_files(
         new_value={"transaction_count": len(transactions), "tag_count": len(tags)},
         session_id=session.id, is_auto=True
     )
-    await run_in_threadpool(session_service.mark_session_status, session.id, "completed")
+    final_status = "completed_with_warnings" if parse_warnings else "completed"
+    await run_in_threadpool(session_service.mark_session_status, session.id, final_status)
     _set_parse_progress(
         progress_id,
         100,
-        f"Audit ready: {len(transactions)} transactions, {len(tags)} tags.",
+        f"Audit ready: {len(transactions)} transactions, {len(tags)} tags."
+        + (f" {len(parse_warnings)} warning(s)." if parse_warnings else ""),
         "complete",
         session_id=session.id,
         transaction_count=len(transactions),
         tag_count=len(tags),
+        warnings=parse_warnings,
     )
     
     return {
         "session_id": session.id,
         "transaction_count": len(transactions),
         "tag_count": len(tags),
-        "client_count": len(clients)
+        "client_count": len(clients),
+        "warnings": parse_warnings,
     }
 
 @router.get("/session/{session_id}/tags/summary")
@@ -437,8 +388,8 @@ def get_client_names(session_id: int, db: Session = Depends(get_db)):
                 if n and n.lower() not in seen:
                     seen.add(n.lower())
                     names.append(n)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[transactions] Failed to read client list for session {session_id}: {exc}")
     return names
 
 @router.post("/{transaction_id}/notes")
@@ -490,11 +441,12 @@ def retag_session(
     # Reload clients from the session's original CSV path
     clients: List[Dict] = []
     csv_svc = CSVService()
+    client_list_warning = None
     if session.csv_path and os.path.exists(session.csv_path):
         try:
             clients = csv_svc.parse_client_list(session.csv_path)
-        except Exception:
-            pass  # Proceed with empty clients; broker/suspicious tagging still works
+        except Exception as exc:
+            client_list_warning = f"Client list could not be read; client matching was skipped: {exc}"
 
     tagging = TaggingService(db)
     session_settings = session.settings_snapshot or {}
@@ -508,7 +460,7 @@ def retag_session(
         session_id=session_id,
         is_auto=False
     )
-    return {"success": True, "session_id": session_id, "tag_count": tag_count}
+    return {"success": True, "session_id": session_id, "tag_count": tag_count, "client_list_warning": client_list_warning}
 
 
 @router.patch("/{transaction_id}", response_model=TransactionResponse)
@@ -584,40 +536,15 @@ async def append_pdfs_to_session(
         except (json.JSONDecodeError, TypeError):
             pass
 
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-    def safe_save(upload_file: UploadFile, allowed_extensions: set) -> str:
-        safe_name = Path(upload_file.filename or "file").name
-        ext = Path(safe_name).suffix.lower()
-        if ext not in allowed_extensions:
-            raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext or 'unknown'}")
-        unique_name = f"{uuid.uuid4().hex}{ext}"
-        dest = os.path.join(UPLOAD_DIR, unique_name)
-        written = 0
-        with open(dest, "wb") as f:
-            while True:
-                chunk = upload_file.file.read(1024 * 1024)
-                if not chunk:
-                    break
-                written += len(chunk)
-                if written > MAX_UPLOAD_BYTES:
-                    f.close()
-                    try:
-                        os.remove(dest)
-                    except OSError:
-                        pass
-                    raise HTTPException(status_code=413, detail=f"File too large: {safe_name}")
-                f.write(chunk)
-        return os.path.abspath(dest)
-
     # Load existing client list from session
     csv_service = CSVService()
     clients = []
+    append_warnings = []
     if session.csv_path and os.path.exists(session.csv_path):
         try:
-            clients = await run_in_threadpool(csv_service.parse_client_list, session.csv_path)
-        except Exception:
-            pass  # Continue without client list; broker/suspicious tagging still works
+            clients = await run_in_threadpool(csv_service.parse_client_list, session.csv_path, None, None, True)
+        except Exception as exc:
+            append_warnings.append(f"Client list could not be read; client matching was skipped: {exc}")
 
     existing_count = session_service.get_transaction_count(session_id)
 
@@ -628,7 +555,7 @@ async def append_pdfs_to_session(
 
     for i, pdf_file in enumerate(pdf):
         file_index = i + 1
-        pdf_path = safe_save(pdf_file, PDF_EXTENSIONS)
+        pdf_path = _save_upload_file(pdf_file, PDF_EXTENSIONS)
         new_pdf_paths.append(pdf_path)
         _set_parse_progress(
             progress_id,
@@ -649,6 +576,8 @@ async def append_pdfs_to_session(
             bank_name,
             report_pdf_progress,
         )
+        for warning in pdf_service.last_warnings:
+            append_warnings.append(f"{pdf_file.filename}: {warning}")
         for tx in txns:
             tx["pdf_filename"] = pdf_file.filename
             tx["payment_method"] = detect_payment_method(tx.get("description"), tx.get("party_name"))
@@ -661,9 +590,19 @@ async def append_pdfs_to_session(
         )
 
     if not all_new_transactions:
-        session_service.mark_session_status(session_id, "completed")
-        _set_parse_progress(progress_id, 100, "No transactions found in the new PDFs.", "complete", session_id=session_id, transaction_count=0)
-        return {"session_id": session_id, "new_transaction_count": 0, "tag_count": 0}
+        status = "completed_with_warnings" if append_warnings else "completed"
+        session_service.mark_session_status(session_id, status)
+        _set_parse_progress(
+            progress_id,
+            100,
+            "No transactions found in the new PDFs."
+            + (f" {len(append_warnings)} warning(s)." if append_warnings else ""),
+            "complete",
+            session_id=session_id,
+            transaction_count=0,
+            warnings=append_warnings,
+        )
+        return {"session_id": session_id, "new_transaction_count": 0, "tag_count": 0, "warnings": append_warnings}
 
     _set_parse_progress(progress_id, 72, f"Saving {len(all_new_transactions)} new transactions…", "saving_transactions")
     await asyncio.sleep(0)
@@ -707,19 +646,23 @@ async def append_pdfs_to_session(
         new_value={"appended_transactions": len(new_transactions), "tag_count": len(tags)},
         session_id=session_id, is_auto=False,
     )
-    await run_in_threadpool(session_service.mark_session_status, session_id, "completed")
+    final_status = "completed_with_warnings" if append_warnings else "completed"
+    await run_in_threadpool(session_service.mark_session_status, session_id, final_status)
 
     _set_parse_progress(
         progress_id, 100,
-        f"Appended {len(new_transactions)} transactions, {len(tags)} tags applied.",
+        f"Appended {len(new_transactions)} transactions, {len(tags)} tags applied."
+        + (f" {len(append_warnings)} warning(s)." if append_warnings else ""),
         "complete",
         session_id=session_id,
         transaction_count=len(new_transactions),
         tag_count=len(tags),
+        warnings=append_warnings,
     )
 
     return {
         "session_id": session_id,
         "new_transaction_count": len(new_transactions),
         "tag_count": len(tags),
+        "warnings": append_warnings,
     }

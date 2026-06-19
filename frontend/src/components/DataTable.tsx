@@ -79,6 +79,7 @@ export const DataTable: React.FC<DataTableProps> = ({ analytics, isLoading }) =>
   const parentRef = useRef<HTMLDivElement>(null)
 
   // Columns
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TanStack Table ColumnDef requires `any` for mixed-type getValue() calls
   const columns = useMemo<ColumnDef<Transaction, any>[]>(
     () => [
       {
