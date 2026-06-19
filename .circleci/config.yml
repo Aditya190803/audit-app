@@ -28,8 +28,33 @@ commands:
           shell: powershell.exe
           command: |
             powershell -c "irm bun.sh/install.ps1 | iex"
-            $env:Path = "$env:USERPROFILE\.bun\bin;" + $env:Path
+            $bunBin = "$env:USERPROFILE\.bun\bin"
+            $env:Path = "$bunBin;" + $env:Path
             [System.Environment]::SetEnvironmentVariable('Path', $env:Path, 'User')
+
+  ensure-bun-path:
+    steps:
+      - run:
+          name: Ensure Bun is on PATH
+          command: |
+            if [ -f "$BASH_ENV" ]; then
+              # shellcheck disable=SC1090
+              source "$BASH_ENV"
+            fi
+            command -v bun
+
+  ensure-bun-path-windows:
+    steps:
+      - run:
+          name: Ensure Bun is on PATH (Windows)
+          shell: powershell.exe
+          command: |
+            $bunBin = "$env:USERPROFILE\.bun\bin"
+            if (-not (Test-Path $bunBin)) {
+              throw "Bun not found at $bunBin"
+            }
+            $env:Path = "$bunBin;" + $env:Path
+            Get-Command bun
 
   install-deps:
     steps:
@@ -37,7 +62,7 @@ commands:
       - run:
           name: Install frontend dependencies
           command: |
-            source $BASH_ENV
+            source "$BASH_ENV"
             bun install --frozen-lockfile
 
   install-deps-windows:
@@ -47,6 +72,7 @@ commands:
           name: Install frontend dependencies (Windows)
           shell: powershell.exe
           command: |
+            $env:Path = "$env:USERPROFILE\.bun\bin;" + $env:Path
             bun install --frozen-lockfile
 
 # ── Jobs ──────────────────────────────────────────────────────
@@ -59,7 +85,7 @@ jobs:
       - run:
           name: Resolve & validate release tag
           command: |
-            TAG="${CIRCLE_TAG:-${RELEASE_TAG:-}}"
+            TAG="${CIRCLE_TAG:-${RELEASE_TAG:-<< pipeline.parameters.release-tag >>}}"
             if [ -z "$TAG" ]; then
               echo "No tag provided — set CIRCLE_TAG (tag push) or pass release-tag parameter." >&2
               exit 1
@@ -74,8 +100,7 @@ jobs:
               echo "Tag $TAG doesn't match package.json version $PACKAGE_VERSION" >&2
               exit 1
             fi
-            echo "export RELEASE_TAG=$TAG" >> $BASH_ENV
-            echo "export RELEASE_VERSION=$VERSION" >> $BASH_ENV
+            echo "Validated release tag $TAG (version $VERSION)"
       - persist_to_workspace:
           root: .
           paths:
@@ -109,21 +134,24 @@ jobs:
             python -m venv .venv
             .\.venv\Scripts\python.exe -m pip install --upgrade pip
             .\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt pytest pyinstaller
+      - ensure-bun-path-windows
       - run:
           name: Production verification
           shell: powershell.exe
           command: |
+            $env:Path = "$env:USERPROFILE\.bun\bin;" + $env:Path
             $env:PYTHON = "$pwd\.venv\Scripts\python.exe"
-            $env:UPDATE_FEED_URL = "https://github.com/$env:CIRCLE_PROJECT_USERNAME/$env:CIRCLE_PROJECT_REPONAME/releases/download/$env:RELEASE_TAG"
+            $env:UPDATE_FEED_URL = "https://github.com/$env:CIRCLE_PROJECT_USERNAME/$env:CIRCLE_PROJECT_REPONAME/releases/download/$env:CIRCLE_TAG"
             $env:LICENSE_CHECK_URL = "https://the-ska-auditing-app.vercel.app/api/license"
             bun run verify:prod
       - run:
           name: Build Windows installer
           shell: powershell.exe
           command: |
+            $env:Path = "$env:USERPROFILE\.bun\bin;" + $env:Path
             $env:GH_TOKEN = "$env:GITHUB_TOKEN"
-            $env:UPDATE_FEED_URL = "https://github.com/$env:CIRCLE_PROJECT_USERNAME/$env:CIRCLE_PROJECT_REPONAME/releases/download/$env:RELEASE_TAG"
-            bunx electron-builder --win --x64 --publish never
+            $env:UPDATE_FEED_URL = "https://github.com/$env:CIRCLE_PROJECT_USERNAME/$env:CIRCLE_PROJECT_REPONAME/releases/download/$env:CIRCLE_TAG"
+            bun run package:ci:win
       - store_artifacts:
           path: out/dist
       - persist_to_workspace:
@@ -149,19 +177,22 @@ jobs:
             python3 -m venv .venv
             .venv/bin/python -m pip install --upgrade pip
             .venv/bin/python -m pip install -r backend/requirements.txt pytest pyinstaller
+      - ensure-bun-path
       - run:
           name: Production verification
           command: |
+            source "$BASH_ENV"
             export PYTHON=".venv/bin/python"
-            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$RELEASE_TAG"
+            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$CIRCLE_TAG"
             export LICENSE_CHECK_URL="https://the-ska-auditing-app.vercel.app/api/license"
             bun run verify:prod
       - run:
           name: Build macOS arm64 (Apple Silicon)
           command: |
+            source "$BASH_ENV"
             export GH_TOKEN="$GITHUB_TOKEN"
-            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$RELEASE_TAG"
-            bunx electron-builder --mac --arm64 --publish never
+            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$CIRCLE_TAG"
+            bun run package:ci:mac:arm64
       - store_artifacts:
           path: out/dist
       - persist_to_workspace:
@@ -187,19 +218,22 @@ jobs:
             python3 -m venv .venv
             .venv/bin/python -m pip install --upgrade pip
             .venv/bin/python -m pip install -r backend/requirements.txt pytest pyinstaller
+      - ensure-bun-path
       - run:
           name: Production verification
           command: |
+            source "$BASH_ENV"
             export PYTHON=".venv/bin/python"
-            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$RELEASE_TAG"
+            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$CIRCLE_TAG"
             export LICENSE_CHECK_URL="https://the-ska-auditing-app.vercel.app/api/license"
             bun run verify:prod
       - run:
           name: Build macOS x64 (Intel — cross-compile)
           command: |
+            source "$BASH_ENV"
             export GH_TOKEN="$GITHUB_TOKEN"
-            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$RELEASE_TAG"
-            bunx electron-builder --mac --x64 --publish never
+            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$CIRCLE_TAG"
+            bun run package:ci:mac:x64
       - store_artifacts:
           path: out/dist
       - persist_to_workspace:
@@ -223,19 +257,22 @@ jobs:
             python -m venv .venv
             .venv/bin/python -m pip install --upgrade pip
             .venv/bin/python -m pip install -r backend/requirements.txt pytest pyinstaller
+      - ensure-bun-path
       - run:
           name: Production verification
           command: |
+            source "$BASH_ENV"
             export PYTHON=".venv/bin/python"
-            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$RELEASE_TAG"
+            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$CIRCLE_TAG"
             export LICENSE_CHECK_URL="https://the-ska-auditing-app.vercel.app/api/license"
             bun run verify:prod
       - run:
           name: Build Linux AppImage
           command: |
+            source "$BASH_ENV"
             export GH_TOKEN="$GITHUB_TOKEN"
-            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$RELEASE_TAG"
-            bunx electron-builder --linux --x64 --publish never
+            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$CIRCLE_TAG"
+            bun run package:ci:linux
       - store_artifacts:
           path: out/dist
       - persist_to_workspace:
@@ -253,13 +290,16 @@ jobs:
       - run:
           name: Create GitHub Release & upload assets
           command: |
+            TAG="${CIRCLE_TAG}"
+            VERSION="${TAG#v}"
+
             # Create the release
-            gh release create "$RELEASE_TAG" \
-              --title "Bank Audit App $RELEASE_VERSION" \
+            gh release create "$TAG" \
+              --title "Bank Audit App $VERSION" \
               --generate-notes
 
             # Upload all platform artifacts
-            gh release upload "$RELEASE_TAG" out/dist/* --clobber
+            gh release upload "$TAG" out/dist/* --clobber
 
 # ── Workflows ─────────────────────────────────────────────────
 workflows:

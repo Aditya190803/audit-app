@@ -22,6 +22,10 @@
     "test:backend": "node scripts/test-backend.js",
     "test": "bun run typecheck && bun run test:frontend && bun run test:backend",
     "verify:prod": "node scripts/verify-production.js",
+    "package:ci:win": "electron-builder --win --x64 --publish never",
+    "package:ci:mac:arm64": "electron-builder --mac --arm64 --publish never",
+    "package:ci:mac:x64": "electron-builder --mac --x64 --publish never",
+    "package:ci:linux": "electron-builder --linux --x64 --publish never",
     "review:coderabbit": "coderabbit review --agent --base master"
   },
   "dependencies": {
@@ -90,8 +94,7 @@
     },
     "win": {
       "target": "nsis",
-      "signAndEditExecutable": false,
-      "_win_signing_note": "signAndEditExecutable is false because signing is handled by CI (CSC_LINK/WIN_CSC_LINK). Set to true only when the signing certificate is available at build time."
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
