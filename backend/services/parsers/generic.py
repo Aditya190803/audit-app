@@ -30,34 +30,75 @@ class GenericParser(BaseParser):
         return 0.1
 
     def parse(self, tables: List[Dict], pages: List[Dict]) -> List[Dict[str, Any]]:
-        transactions = []
+        """Multi-strategy parser.
 
+        Tries several extraction strategies and returns the best result set
+        based on a scoring heuristic (most valid txns + best date/amount coverage).
+        """
+        date_pattern = re.compile(
+            r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2}|"
+            r"\d{1,2}\.\d{1,2}\.\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{4}"
+        )
+        value_date_pattern = re.compile(
+            r"^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$|^\d{1,2}\.\d{1,2}\.\d{2,4}$|"
+            r"^\d{1,2}\s+[A-Za-z]{3}\s+\d{4}$"
+        )
+        amount_pattern = re.compile(r"^\(?-?[\d,]+\.\d{1,2}\)?$")
+
+        candidates = []
+
+        # Strategy 1: Standard table (indexed columns)
         if tables:
-            date_pattern = re.compile(
-                r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2}|"
-                r"\d{1,2}\.\d{1,2}\.\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{4}"
-            )
-            value_date_pattern = re.compile(
-                r"^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$|^\d{1,2}\.\d{1,2}\.\d{2,4}$|"
-                r"^\d{1,2}\s+[A-Za-z]{3}\s+\d{4}$"
-            )
-            amount_pattern = re.compile(r"^\(?-?[\d,]+\.\d{1,2}\)?$")
-
+            txns = []
             for table in tables:
-                txns = self._parse_table(table, date_pattern, amount_pattern, value_date_pattern)
-                if not txns:
-                    txns = self._parse_amount_type_table(table, date_pattern)
-                if not txns:
-                    txns = self._parse_balance_delta_table(table, date_pattern, amount_pattern, value_date_pattern)
-                transactions.extend(txns)
+                txns.extend(self._parse_table(table, date_pattern, amount_pattern, value_date_pattern))
+            if txns:
+                candidates.append(("table-indexed", txns))
 
-        if not transactions:
-            transactions = self._parse_from_text(pages)
+        # Strategy 2: Amount-type table (no header, amounts + type column)
+        if tables:
+            txns = []
+            for table in tables:
+                txns.extend(self._parse_amount_type_table(table, date_pattern))
+            if txns:
+                candidates.append(("amount-type", txns))
 
-        if not transactions:
-            transactions = self._parse_line_by_line(pages)
+        # Strategy 3: Balance delta table
+        if tables:
+            txns = []
+            for table in tables:
+                txns.extend(self._parse_balance_delta_table(table, date_pattern, amount_pattern, value_date_pattern))
+            if txns:
+                candidates.append(("balance-delta", txns))
 
-        return transactions
+        # Strategy 4: Free text extraction
+        txns = self._parse_from_text(pages)
+        if txns:
+            candidates.append(("text", txns))
+
+        # Strategy 5: Line-by-line fallback
+        txns = self._parse_line_by_line(pages)
+        if txns:
+            candidates.append(("line-by-line", txns))
+
+        if not candidates:
+            return []
+
+        # Score and pick the best
+        best_name, best_txns = max(candidates, key=lambda item: self._score_transactions(item[1]))
+        # Optional: log which strategy won (useful for debugging)
+        # print(f"[GenericParser] Best strategy: {best_name} ({len(best_txns)} txns)")
+        return best_txns
+
+    def _score_transactions(self, txns: List[Dict[str, Any]]) -> float:
+        """Score a transaction list. Higher is better."""
+        if not txns:
+            return 0.0
+        valid = sum(1 for t in txns if t.get("date") and t.get("amount") is not None)
+        unique_dates = len({t.get("date") for t in txns if t.get("date")})
+        # Reward volume + validity, penalize too many duplicate dates
+        score = len(txns) * 10 + valid * 5 - (len(txns) - unique_dates) * 3
+        return max(score, 0.0)
 
     def _parse_table(self, table, date_pattern, amount_pattern, value_date_pattern):
         data = table["data"]
