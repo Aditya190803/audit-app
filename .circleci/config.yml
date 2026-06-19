@@ -21,6 +21,16 @@ commands:
             echo 'export BUN_INSTALL="$HOME/.bun"' >> $BASH_ENV
             echo 'export PATH="$BUN_INSTALL/bin:$PATH"' >> $BASH_ENV
 
+  setup-bun-windows:
+    steps:
+      - run:
+          name: Install Bun (Windows)
+          shell: powershell.exe
+          command: |
+            powershell -c "irm bun.sh/install.ps1 | iex"
+            $env:Path = "$env:USERPROFILE\.bun\bin;" + $env:Path
+            [System.Environment]::SetEnvironmentVariable('Path', $env:Path, 'User')
+
   install-deps:
     steps:
       - setup-bun
@@ -28,6 +38,15 @@ commands:
           name: Install frontend dependencies
           command: |
             source $BASH_ENV
+            bun install --frozen-lockfile
+
+  install-deps-windows:
+    steps:
+      - setup-bun-windows
+      - run:
+          name: Install frontend dependencies (Windows)
+          shell: powershell.exe
+          command: |
             bun install --frozen-lockfile
 
 # ── Jobs ──────────────────────────────────────────────────────
@@ -72,13 +91,15 @@ jobs:
     steps:
       - attach_workspace:
           at: .
-      - install-deps
+      - install-deps-windows
       - run:
-          name: Install Python 3.12
+          name: Ensure Python 3.12
+          shell: powershell.exe
           command: |
-            winget install --id Python.Python.3.12 --silent --accept-package-agreements
-            echo "C:\Python312" >> $env:GITHUB_PATH
-            echo "C:\Python312\Scripts" >> $env:GITHUB_PATH
+            # Use pre-installed Python or install via Chocolatey (more reliable on CircleCI)
+            if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+              choco install python312 -y
+            }
             python --version
       - run:
           name: Create Python venv & install deps
@@ -89,13 +110,15 @@ jobs:
             .\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt pytest pyinstaller
       - run:
           name: Production verification
+          shell: powershell.exe
           command: |
-            $env:PYTHON = "$pwd\\.venv\\Scripts\\python.exe"
+            $env:PYTHON = "$pwd\.venv\Scripts\python.exe"
             $env:UPDATE_FEED_URL = "https://github.com/$env:CIRCLE_PROJECT_USERNAME/$env:CIRCLE_PROJECT_REPONAME/releases/download/$env:RELEASE_TAG"
             $env:LICENSE_CHECK_URL = "https://the-ska-auditing-app.vercel.app/api/license"
             bun run verify:prod
       - run:
           name: Build Windows installer
+          shell: powershell.exe
           command: |
             $env:GH_TOKEN = "$env:GITHUB_TOKEN"
             $env:UPDATE_FEED_URL = "https://github.com/$env:CIRCLE_PROJECT_USERNAME/$env:CIRCLE_PROJECT_REPONAME/releases/download/$env:RELEASE_TAG"
