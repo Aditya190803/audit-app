@@ -163,6 +163,8 @@ class HDFCBankParser(BaseParser):
     def _is_transaction_start(text: str) -> bool:
         if re.search(
             r"^(?:UPI-|NEFT\s*DR-|NEFTDR-|RTGS-|IMPS-|CASH\s*DEPOSIT|CASHDEPOSIT|"
+            r"NEFT\s*CR-|NEFTCR-|INTERESTPAIDTILL|FDTHROUGHMOBILE-|IBFUNDSTRANSFERCR-|"
+            r"GST/BANKREFERENCENO:|I/WCHQRETURN-|CHQRETURNCHGS|"
             r"POS\d+|OTHPOS\d+|IBBILLPAY|ACH|ATW-|ATM|CHQ\s+PAID)",
             text,
             re.IGNORECASE,
