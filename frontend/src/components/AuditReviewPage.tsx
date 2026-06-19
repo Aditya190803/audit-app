@@ -5,13 +5,13 @@ import {
   Users, Building2, TrendingUp, Calendar, Repeat,
   IndianRupee, HelpCircle,
 } from 'lucide-react'
-import type { AuditAnalytics } from '../utils/auditAnalytics'
+import type { AuditAnalytics, ReviewView } from '../utils/auditAnalytics'
 
 interface AuditReviewPageProps {
   analytics: AuditAnalytics
   activeTab: string
   suspiciousThreshold: number
-  onTabChange: (tab: any) => void
+  onTabChange: (tab: ReviewView) => void
   onExceptionFilter: (key: string, value: string) => void
 }
 

@@ -4,7 +4,13 @@ from typing import List, Dict, Any
 import os
 
 class CSVService:
-    def parse_client_list(self, file_path: str, sheet_name: str = None, name_column: str = None) -> List[Dict[str, Any]]:
+    def parse_client_list(
+        self,
+        file_path: str,
+        sheet_name: str = None,
+        name_column: str = None,
+        strict: bool = False,
+    ) -> List[Dict[str, Any]]:
         """Parse a CSV or Excel client list and return normalized client records."""
         clients = []
         
@@ -87,6 +93,10 @@ class CSVService:
                                     })
                 except Exception as e2:
                     print(f"[CSVService] Fallback CSV parsing failed: {e2}")
+                    if strict:
+                        raise ValueError(f"Failed to parse client list: {e2}") from e2
+            elif strict:
+                raise ValueError(f"Failed to parse client list: {e}") from e
         
         return clients
 

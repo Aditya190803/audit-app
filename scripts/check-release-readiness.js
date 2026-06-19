@@ -31,6 +31,7 @@ function checkTrackedArtifacts() {
     /^resources\/python-dist\//,
     /^resources\/tesseract\//,
     /^out\//,
+    /^example\/(?!synthetic\/).*\.(?:pdf|xlsx|xls|csv)$/i,
     /^build\/(?!(?:icon\.png|icon\.ico|icon\.svg|entitlements\.mac\.plist)$)/,
     /(^|\/)__pycache__\//,
     /\.pyc$/,

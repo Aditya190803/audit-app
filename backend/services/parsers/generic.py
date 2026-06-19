@@ -75,55 +75,83 @@ class GenericParser(BaseParser):
                 continue
 
             if has_amount_cols:
-                tx = self._extract_row_indexed(row, col_indices, date_pattern)
+                tx_or_list = self._extract_row_indexed(row, col_indices, date_pattern)
             else:
-                tx = self._parse_table_row(row, amount_pattern, date_pattern, value_date_pattern)
+                tx_or_list = self._parse_table_row(row, amount_pattern, date_pattern, value_date_pattern)
 
-            if tx:
-                tx["page_number"] = table["page_number"]
-                transactions.append(tx)
+            if tx_or_list:
+                if isinstance(tx_or_list, list):
+                    for t in tx_or_list:
+                        t["page_number"] = table["page_number"]
+                        transactions.append(t)
+                else:
+                    tx_or_list["page_number"] = table["page_number"]
+                    transactions.append(tx_or_list)
 
         return transactions
 
     def _extract_row_indexed(self, row, col_indices, date_pattern):
-        date = None
-        amount = None
-        description = None
-
-        if "date" in col_indices:
-            cell = self._safe_cell(row, col_indices["date"])
-            if cell and date_pattern.search(str(cell)):
-                date = str(cell)
-
+        date_cell = self._safe_cell(row, col_indices.get("date")) if "date" in col_indices else None
         wd_idx = col_indices.get("withdrawal")
         dp_idx = col_indices.get("deposit")
-        amount = self._amount_from_debit_credit(
-            self._safe_cell(row, wd_idx) if wd_idx is not None else None,
-            self._safe_cell(row, dp_idx) if dp_idx is not None else None,
-        )
-
+        wd_cell = self._safe_cell(row, wd_idx) if wd_idx is not None else None
+        dp_cell = self._safe_cell(row, dp_idx) if dp_idx is not None else None
         desc_idx = col_indices.get("description")
-        if desc_idx is not None:
-            desc = str(self._safe_cell(row, desc_idx) or "").strip()
-            desc = " ".join(desc.replace("\n", " ").split())
-            if desc:
-                description = desc
+        desc_cell = self._safe_cell(row, desc_idx) if desc_idx is not None else None
 
-        chq_idx = col_indices.get("cheque")
-        if not description and chq_idx is not None:
-            desc = str(self._safe_cell(row, chq_idx) or "").strip()
-            if desc:
-                description = desc
+        has_multiline = any(c and "\n" in str(c) for c in [date_cell, wd_cell, dp_cell, desc_cell])
 
-        if date and amount is not None:
-            return {
-                "date": date,
-                "amount": amount,
-                "description": description or "",
-                "party_name": self._extract_party_from_description(description) or description or "",
-                "raw_text": " | ".join(str(c or "") for c in row),
-            }
-        return None
+        if not has_multiline:
+            # fast path for normal rows
+            date = str(date_cell).strip() if date_cell and date_pattern.search(str(date_cell)) else None
+            amount = self._amount_from_debit_credit(wd_cell, dp_cell)
+            description = None
+            if desc_cell:
+                d = " ".join(str(desc_cell).replace("\n", " ").split())
+                if d: description = d
+            elif col_indices.get("cheque") is not None:
+                d = " ".join(str(self._safe_cell(row, col_indices["cheque"]) or "").replace("\n", " ").split())
+                if d: description = d
+            if date and amount is not None:
+                return {
+                    "date": date,
+                    "amount": amount,
+                    "description": description or "",
+                    "party_name": self._extract_party_from_description(description) or description or "",
+                    "raw_text": " | ".join(str(c or "") for c in row),
+                }
+            return None
+
+        # Multi-line crammed row support (generic for any bank using this layout)
+        def split_lines(c):
+            if not c: return [""]
+            return [ln.strip() for ln in str(c).split("\n") if ln.strip()]
+
+        date_lines = split_lines(date_cell)
+        wd_lines = split_lines(wd_cell)
+        dp_lines = split_lines(dp_cell)
+        desc_lines = split_lines(desc_cell) if desc_cell else [""] * max(len(date_lines), 1)
+
+        n = len(date_lines) if date_lines else max(len(wd_lines), len(dp_lines), 1)
+        txs = []
+        for i in range(n):
+            d_line = date_lines[i] if i < len(date_lines) else (date_lines[-1] if date_lines else "")
+            w_line = wd_lines[i] if i < len(wd_lines) else ""
+            p_line = dp_lines[i] if i < len(dp_lines) else ""
+            desc_line = desc_lines[i] if i < len(desc_lines) else (desc_lines[-1] if desc_lines else "")
+            amt = self._amount_from_debit_credit(None, p_line) if p_line else self._amount_from_debit_credit(w_line or None, None)
+            if amt is None:
+                amt = self._amount_from_debit_credit(w_line or None, p_line or None)
+            if d_line and amt is not None and date_pattern.search(d_line):
+                clean_desc = " ".join(desc_line.replace("\n", " ").split())
+                txs.append({
+                    "date": d_line,
+                    "amount": amt,
+                    "description": clean_desc,
+                    "party_name": self._extract_party_from_description(clean_desc) or clean_desc,
+                    "raw_text": "multi-line-generic-split",
+                })
+        return txs if txs else None
 
     def _parse_table_row(self, row, amount_pattern, date_pattern, value_date_pattern):
         date = None

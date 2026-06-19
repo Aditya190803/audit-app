@@ -292,6 +292,32 @@ class BankParserTests(unittest.TestCase):
         self.assertEqual(parser._extract_row(cash, 218574.76)["party_name"], "Cash Deposit")
 
 
+    def test_hdfc_bank_splits_interest_and_bank_transfer_compact_rows(self):
+        parser = HDFCBankParser()
+        txs = parser.parse([{
+            "page_number": 1,
+            "data": [[
+                "Date", "Narration", "Chq./Ref.No.", "ValueDt", "WithdrawalAmt.", "DepositAmt.", "ClosingBalance"
+            ], [
+                "01/07/24\n22/07/24\n24/08/24\n25/08/24\n01/10/24\n22/10/24\n22/10/24\n01/01/25\n01/04/25",
+                "INTERESTPAIDTILL30-JUN-2024\nNEFTCR-SBIN0000TBU-ITDTAXREFUND2024-2\n5AGQPK5459D-ANURADHA\nAGRAWAL-SBIN524204\n417669\nFDTHROUGHMOBILE-50301025931767:ANURADH\nAAGRAWAL\nIBFUNDSTRANSFERCR-05431050166947 -AN\nURADHAAGRAWAL\nINTERESTPAIDTILL30-SEP-2024\nIBFUNDSTRANSFERCR-05431050166947 -AN\nURADHAAGRAWAL\nGST/BANKREFERENCENO:R2429658421272/CI\nNNO:HDFC24102700712694\nINTERESTPAIDTILL31-DEC-2024\nINTERESTPAIDTILL31-MAR-2025",
+                "000000000000000\nSBIN524204417669\nMB24090806196T43\nIB25075556668926\n000000000000000\nIB22142603362515\n0241022270025169\n000000000000000\n000000000000000",
+                "30/06/24\n22/07/24\n24/08/24\n25/08/24\n30/09/24\n22/10/24\n22/10/24\n31/12/24\n31/03/25",
+                "100,000.00\n35,156.00",
+                "536.00\n52,620.00\n5,100.00\n556.00\n6,000.00\n61.00\n11.00",
+                "72,368.65\n124,988.65\n24,988.65\n30,088.65\n30,644.65\n36,644.65\n1,488.65\n1,549.65\n1,560.65",
+            ]],
+        }], [])
+
+        self.assertEqual(len(txs), 9)
+        self.assertEqual([tx["date"] for tx in txs[:4]], ["01/07/24", "22/07/24", "24/08/24", "25/08/24"])
+        self.assertEqual([tx["amount"] for tx in txs[:4]], [536.0, 52620.0, -100000.0, 5100.0])
+        self.assertEqual(txs[0]["description"], "INTERESTPAIDTILL30-JUN-2024")
+        self.assertTrue(txs[1]["description"].startswith("NEFTCR-SBIN0000TBU-ITDTAXREFUND2024"))
+        self.assertTrue(txs[2]["description"].startswith("FDTHROUGHMOBILE-50301025931767"))
+        self.assertTrue(txs[6]["description"].startswith("GST/BANKREFERENCENO:R2429658421272"))
+
+
     def test_idfc_bank_detects_table(self):
         parser = IDFCBankParser()
         tables = [{"data": [["Transaction\nDate", "Value Date", "Particulars", "Cheque\nNo", "Debit", "Credit", "Balance"]], "page_number": 1}]

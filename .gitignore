@@ -76,9 +76,11 @@ exports/
 backend.spec
 
 # Local/sensitive example inputs
-example/canara-bank/*.pdf
-example/canara-bank/*.xlsx
-example/canara-bank/*.xls
+example/**/*.pdf
+example/**/*.xlsx
+example/**/*.xls
+example/**/*.csv
+!example/synthetic/**/*
 
 # Site (Next.js sub-project)
 site/.next/

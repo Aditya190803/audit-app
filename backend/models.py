@@ -13,7 +13,7 @@ class AuditSession(Base):
     name = Column(String, nullable=True)
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
-    status = Column(String, default="active")  # active, completed, crashed
+    status = Column(String, default="active")  # active, completed, completed_with_warnings, failed, crashed
     pdf_path = Column(String, nullable=True)
     csv_path = Column(String, nullable=True)
     settings_snapshot = Column(JSON, default=dict)
