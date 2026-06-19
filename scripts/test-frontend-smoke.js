@@ -51,11 +51,12 @@ function main() {
   assert(main.includes("execFileSync('taskkill'"), 'Windows backend shutdown must use taskkill for process trees')
   assert(main.includes('requestSingleInstanceLock'), 'Electron app must enforce a single instance')
 
-  const fileDropZone = read('frontend/src/components/FileDropZone.tsx')
-  assert(fileDropZone.includes("XLSX.read(text, { type: 'string' })"), 'CSV headers must be parsed with XLSX, not naive comma splitting')
-  assert(fileDropZone.includes('rowsToObjects(rawRows, headerRow, detectedColumns)'), 'AP-code extraction must respect selected CSV header row')
-  assert(fileDropZone.includes('reader.readAsArrayBuffer(clientListFile)'), 'Excel client-list parsing must read the whole workbook')
-  assert(!fileDropZone.includes('clientListFile.slice(0, 2 * 1024 * 1024)'), 'Excel client-list parsing must not truncate workbooks')
+  const clientListPreview = read('frontend/src/hooks/useClientListPreview.ts')
+  const apCodeSelection = read('frontend/src/hooks/useApCodeSelection.ts')
+  assert(clientListPreview.includes("XLSX.read(text, { type: 'string' })"), 'CSV headers must be parsed with XLSX, not naive comma splitting')
+  assert(apCodeSelection.includes('rowsToObjects(rawRows, headerRow, detectedColumns)'), 'AP-code extraction must respect selected CSV header row')
+  assert(clientListPreview.includes('reader.readAsArrayBuffer(clientListFile)'), 'Excel client-list parsing must read the whole workbook')
+  assert(!clientListPreview.includes('clientListFile.slice(0, 2 * 1024 * 1024)'), 'Excel client-list parsing must not truncate workbooks')
 
   const releaseGate = read('scripts/check-release-readiness.js')
   assert(releaseGate.includes('icon\\.ico'), 'Release gate must allow the tracked Windows icon')
