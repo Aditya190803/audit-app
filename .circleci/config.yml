@@ -83,8 +83,9 @@ jobs:
 
   build-windows:
     machine:
-      image: windows-server-2025-gpu:2025-05-01
-      resource_class: windows.medium
+      image: windows-server-2022-gui:current
+      shell: powershell.exe -ExecutionPolicy Bypass
+    resource_class: windows.medium
     environment:
       ALLOW_UNSIGNED_RELEASE: "1"
       RELEASE_PLATFORM: windows
