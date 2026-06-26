@@ -152,12 +152,18 @@ jobs:
             $env:GH_TOKEN = "$env:GITHUB_TOKEN"
             $env:UPDATE_FEED_URL = "https://github.com/$env:CIRCLE_PROJECT_USERNAME/$env:CIRCLE_PROJECT_REPONAME/releases/download/$env:CIRCLE_TAG"
             bun run package:ci:win
+      - run:
+          name: Stage artifacts for workspace (win)
+          shell: powershell.exe
+          command: |
+            New-Item -ItemType Directory -Force -Path out\release\win
+            Copy-Item -Recurse -Force out\dist\* out\release\win\
       - store_artifacts:
           path: out/dist
       - persist_to_workspace:
           root: .
           paths:
-            - out/dist
+            - out/release/win
 
   build-macos-arm64:
     macos:
@@ -193,12 +199,17 @@ jobs:
             export GH_TOKEN="$GITHUB_TOKEN"
             export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$CIRCLE_TAG"
             bun run package:ci:mac:arm64
+      - run:
+          name: Stage artifacts for workspace (mac-arm64)
+          command: |
+            mkdir -p out/release/mac-arm64
+            cp -r out/dist/* out/release/mac-arm64/
       - store_artifacts:
           path: out/dist
       - persist_to_workspace:
           root: .
           paths:
-            - out/dist
+            - out/release/mac-arm64
 
   build-macos-x64:
     macos:
@@ -234,12 +245,17 @@ jobs:
             export GH_TOKEN="$GITHUB_TOKEN"
             export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$CIRCLE_TAG"
             bun run package:ci:mac:x64
+      - run:
+          name: Stage artifacts for workspace (mac-x64)
+          command: |
+            mkdir -p out/release/mac-x64
+            cp -r out/dist/* out/release/mac-x64/
       - store_artifacts:
           path: out/dist
       - persist_to_workspace:
           root: .
           paths:
-            - out/dist
+            - out/release/mac-x64
 
   build-linux:
     docker:
@@ -273,12 +289,17 @@ jobs:
             export GH_TOKEN="$GITHUB_TOKEN"
             export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$CIRCLE_TAG"
             bun run package:ci:linux
+      - run:
+          name: Stage artifacts for workspace (linux)
+          command: |
+            mkdir -p out/release/linux
+            cp -r out/dist/* out/release/linux/
       - store_artifacts:
           path: out/dist
       - persist_to_workspace:
           root: .
           paths:
-            - out/dist
+            - out/release/linux
 
   publish:
     docker:
@@ -286,6 +307,17 @@ jobs:
     steps:
       - attach_workspace:
           at: .
+      - run:
+          name: Consolidate platform artifacts
+          command: |
+            mkdir -p out/dist
+            for dir in out/release/*/; do
+              if [ -d "$dir" ]; then
+                cp -r "$dir"* out/dist/
+              fi
+            done
+            echo "=== Consolidated artifacts ==="
+            ls -la out/dist/
       - gh/setup
       - run:
           name: Create GitHub Release & upload assets
