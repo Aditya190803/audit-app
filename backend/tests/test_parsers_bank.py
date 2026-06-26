@@ -355,6 +355,56 @@ class BankParserTests(unittest.TestCase):
         self.assertEqual(tx["amount"], -20612.0)
         self.assertEqual(tx["party_name"], "MD S")
 
+    def test_indusind_bank_parses_iso_date_columnar_layout(self):
+        parser = IndusIndBankParser()
+        lines = [
+            "2025-03-31",
+            "100048445257:Int.Pd:0",
+            "-",
+            "50",
+            "10138.74",
+            "UPI/545422940131/DR",
+            "2025-03-29",
+            "-",
+            "1000",
+            "88.74",
+            "2025-03-29 FT FROM INDUSIND ACCOUNT/REF - 10000 10088.74",
+        ]
+        txns: list = []
+        parser._parse_columnar_lines(lines, 1, txns, [])
+        self.assertEqual(len(txns), 3)
+        self.assertEqual(txns[0]["date"], "2025-03-31")
+        self.assertEqual(txns[0]["amount"], 50.0)
+        self.assertEqual(txns[1]["date"], "2025-03-29")
+        self.assertEqual(txns[1]["amount"], -1000.0)
+        self.assertEqual(txns[1]["description"], "UPI/545422940131/DR")
+        self.assertEqual(txns[2]["amount"], 10000.0)
+        self.assertIn("ACCOUNT/REF", txns[2]["description"])
+
+    def test_indusind_bank_merges_continuation_lines_into_description(self):
+        parser = IndusIndBankParser()
+        lines = [
+            "2025-03-28 UPI/508780183047/DR - 300 1088.74",
+            "/MR.",
+            "/BDBL/2007@okhdfcba",
+            "nk/UPI",
+            "2025-03-27 UPI/508618925687/DR - 70 1388.74",
+            "/EXPR/HDFC/161474@",
+            "hdfcbank/Gene",
+        ]
+        txns: list = []
+        parser._parse_columnar_lines(lines, 2, txns, [])
+        self.assertEqual(len(txns), 2)
+        self.assertEqual(
+            txns[0]["description"],
+            "UPI/508780183047/DR/MR./BDBL/2007@okhdfcbank/UPI",
+        )
+        self.assertEqual(
+            txns[1]["description"],
+            "UPI/508618925687/DR/EXPR/HDFC/161474@hdfcbank/Gene",
+        )
+        self.assertEqual(txns[1]["party_name"], "Gene")
+
 
     def test_pnb_bank_detects_table_with_identity(self):
         parser = PNBBankParser()
