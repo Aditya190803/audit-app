@@ -323,15 +323,30 @@ jobs:
           name: Create GitHub Release & upload assets
           command: |
             TAG="${CIRCLE_TAG}"
+            if [ -z "$TAG" ]; then
+              echo "CIRCLE_TAG is empty — publish only runs on version tags." >&2
+              exit 1
+            fi
             VERSION="${TAG#v}"
 
-            # Create the release
-            gh release create "$TAG" \
-              --title "Bank Audit App $VERSION" \
-              --generate-notes
+            mapfile -t assets < <(find out/dist -maxdepth 1 -type f ! -name '.*' | sort)
+            if [ "${#assets[@]}" -eq 0 ]; then
+              echo "No release files in out/dist (only dirs or empty)." >&2
+              ls -la out/dist/ || true
+              exit 1
+            fi
+            echo "Uploading ${#assets[@]} file(s):"
+            printf '  %s\n' "${assets[@]}"
 
-            # Upload all platform artifacts
-            gh release upload "$TAG" out/dist/* --clobber
+            if ! gh release view "$TAG" >/dev/null 2>&1; then
+              gh release create "$TAG" \
+                --title "Bank Audit App $VERSION" \
+                --generate-notes
+            else
+              echo "Release $TAG already exists — uploading assets only."
+            fi
+
+            gh release upload "$TAG" "${assets[@]}" --clobber
 
 # ── Workflows ─────────────────────────────────────────────────
 workflows:
