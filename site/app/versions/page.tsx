@@ -7,7 +7,6 @@ import {
   ChevronDown,
   ExternalLink,
   Monitor,
-  Apple,
   Tag,
   Calendar,
   ChevronLeft,
@@ -35,12 +34,11 @@ interface Release {
 
 /* ── Platform helpers ── */
 
-type Platform = "windows" | "mac" | "linux";
+type Platform = "windows" | "linux";
 type Arch = "x64" | "arm64";
 
 const platformIcons: Record<Platform, React.ReactNode> = {
   windows: <Monitor className="h-4 w-4" strokeWidth={1.5} />,
-  mac: <Apple className="h-4 w-4" strokeWidth={1.5} />,
   linux: (
     <svg
       className="h-4 w-4"
@@ -58,7 +56,6 @@ const platformIcons: Record<Platform, React.ReactNode> = {
 
 const platformLabels: Record<Platform, string> = {
   windows: "Windows",
-  mac: "macOS",
   linux: "Linux",
 };
 
@@ -71,15 +68,12 @@ function classifyAsset(name: string): { platform: Platform; arch: Arch } | null 
   const lower = name.toLowerCase();
 
   const hasWindows = lower.includes("setup") && lower.endsWith(".exe");
-  const hasMac = lower.endsWith(".dmg");
   const hasLinux = lower.endsWith(".appimage");
 
   const isArm64 = lower.includes("arm64") || lower.includes("arm-64");
-  const isX64 = !isArm64;
 
   let platform: Platform;
   if (hasWindows) platform = "windows";
-  else if (hasMac) platform = "mac";
   else if (hasLinux) platform = "linux";
   else return null;
 
@@ -176,8 +170,8 @@ export default function VersionsPage() {
             All Versions
           </h1>
           <p className="mt-2 text-sm text-text-secondary max-w-md mx-auto">
-            Download previous releases of Bank Audit App. Each version is fully
-            offline and self-contained.
+            Download previous releases for Windows and Linux. Each version is
+            fully offline and self-contained.
           </p>
         </div>
       </section>
@@ -362,7 +356,7 @@ function ReleaseCard({
               <h4 className="text-[11px] font-semibold uppercase tracking-wider text-text-tertiary mb-3">
                 Downloads
               </h4>
-              <div className="grid gap-2 sm:grid-cols-3">
+              <div className="grid gap-2 sm:grid-cols-2">
                 {(Object.keys(grouped) as Platform[]).map((platform) => (
                   <div
                     key={platform}

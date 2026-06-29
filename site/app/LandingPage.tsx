@@ -9,7 +9,6 @@ import {
   Table2,
   FileText,
   Monitor,
-  Apple,
   Lock,
   ChevronDown,
   ExternalLink,
@@ -26,12 +25,11 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
-type Platform = "windows" | "mac" | "linux";
+type Platform = "windows" | "linux";
 
 function detectOS(): Platform {
   if (typeof navigator === "undefined") return "windows";
   const ua = navigator.userAgent.toLowerCase();
-  if (ua.includes("mac")) return "mac";
   if (ua.includes("linux")) return "linux";
   return "windows";
 }
@@ -52,24 +50,6 @@ function getPlatformInfo(version: string) {
           label: "Download for Windows (ARM64)",
           fileName: `Bank.Audit.App.Setup.${version}-arm64.exe`,
           format: ".exe installer",
-          available: true,
-        },
-      },
-    },
-    mac: {
-      name: "macOS",
-      icon: <Apple className="h-5 w-5" strokeWidth={1.5} />,
-      downloads: {
-        x64: {
-          label: "Download for macOS (Intel)",
-          fileName: `Bank.Audit.App-${version}.dmg`,
-          format: ".dmg",
-          available: true,
-        },
-        arm64: {
-          label: "Download for macOS (Apple Silicon)",
-          fileName: `Bank.Audit.App-${version}-arm64.dmg`,
-          format: ".dmg",
           available: true,
         },
       },
@@ -153,7 +133,7 @@ const workflowSteps = [
   { title: "Export", detail: "One-click audit workpaper" },
 ];
 
-const allPlatforms: Platform[] = ["windows", "mac", "linux"];
+const allPlatforms: Platform[] = ["windows", "linux"];
 
 function getManifestPath(yaml: string): string | null {
   const pathMatch = yaml.match(/^path:\s*(.+)$/m);
