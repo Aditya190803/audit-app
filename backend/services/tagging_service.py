@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from backend.models import Transaction, Tag, Broker, Alias, AuditSession
+from backend.models import Transaction, Tag, Broker, Alias
 from backend.services.fuzzy_service import FuzzyService
 from backend.services.config_service import ConfigService
 from backend.services.phone import build_phone_map
@@ -15,19 +15,13 @@ class TaggingService:
         self.config = ConfigService(db)
         self.fuzzy = FuzzyService(threshold=self.config.get_fuzzy_threshold())
 
-    def auto_tag_session(self, session_id: int, clients: List[Dict[str, Any]],
-                         session_settings: Dict[str, Any] = None,
-                         progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Tag]:
-        """Auto-tag all transactions in a session.
-        
-        Args:
-            session_id: Session to process
-            clients: Client list for matching
-            session_settings: Per-session settings snapshot (e.g., threshold override)
+    def _load_tagging_context(self, session_settings: Dict[str, Any]) -> Dict[str, Any]:
+        """Load brokers, aliases, and resolved thresholds once for a tagging run.
+
+        Shared by auto_tag_session (full session) and auto_tag_transactions
+        (appended rows). Returns picklable primitives so it can be forwarded to
+        the worker process pool.
         """
-        transactions = self.db.query(Transaction).filter(Transaction.session_id == session_id).all()
-        
-        # Load brokers and aliases
         brokers = self.db.query(Broker).filter(Broker.is_active == True).all()
         broker_names = [b.name for b in brokers]
         # Map aliases back to canonical broker name for deduplication
@@ -36,56 +30,86 @@ class TaggingService:
             for alias in (b.aliases or []):
                 broker_names.append(alias)
                 alias_to_canonical[alias] = b.name
-        
+
         aliases = self.db.query(Alias).all()
         alias_list = [{"alias_name": a.alias_name, "canonical_name": a.canonical_name} for a in aliases]
-        
-        # Use per-session threshold if available, otherwise global config
+
         session_settings = session_settings or {}
-        exclusions = self.config.get("broker_exclusions") or []
-        suspicious_threshold = float(session_settings.get("suspicious_threshold", self.config.get_threshold()))
-        fuzzy_threshold = self.config.get_fuzzy_threshold()
-        recurring_window = int(self.config.get("recurring_days_window") or 30)
-        suspicious_keywords = self.config.get("suspicious_keywords") or []
-        common_words = self.config.get("broker_common_words") or []
-        
-        # Build phone number map from client list (exact match only, no fuzzy)
+        return {
+            "broker_names": broker_names,
+            "alias_list": alias_list,
+            "alias_to_canonical": alias_to_canonical,
+            "exclusions": self.config.get("broker_exclusions") or [],
+            "suspicious_threshold": float(session_settings.get("suspicious_threshold", self.config.get_threshold())),
+            "fuzzy_threshold": self.config.get_fuzzy_threshold(),
+            "recurring_window": int(self.config.get("recurring_days_window") or 30),
+            "suspicious_keywords": self.config.get("suspicious_keywords") or [],
+            "common_words": self.config.get("broker_common_words") or [],
+        }
+
+    def _persist_auto_tags(self, transaction_ids: List[int], tags_data: List[Dict[str, Any]]) -> List[Tag]:
+        """Replace auto-tags for the given transactions with tags_data; commit; return new tags."""
+        from sqlalchemy import insert
+        self.db.query(Tag).filter(
+            Tag.transaction_id.in_(transaction_ids),
+            Tag.is_manual == False,
+        ).delete(synchronize_session=False)
+        self.db.flush()
+        if tags_data:
+            self.db.execute(insert(Tag), [
+                {"transaction_id": td["transaction_id"], "tag_type": td["tag_type"],
+                 "confidence": td["confidence"], "reason": td["reason"],
+                 "source": "auto", "is_manual": False}
+                for td in tags_data
+            ])
+        self.db.commit()
+        return self.db.query(Tag).filter(
+            Tag.transaction_id.in_(transaction_ids),
+            Tag.is_manual == False,
+        ).all()
+
+    def auto_tag_session(self, session_id: int, clients: List[Dict[str, Any]],
+                         session_settings: Dict[str, Any] = None,
+                         progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Tag]:
+        """Auto-tag all transactions in a session.
+
+        Args:
+            session_id: Session to process
+            clients: Client list for matching
+            session_settings: Per-session settings snapshot (e.g., threshold override)
+        """
+        transactions = self.db.query(Transaction).filter(Transaction.session_id == session_id).all()
+        ctx = self._load_tagging_context(session_settings)
+
         phone_map = build_phone_map(clients)
-        
-        # Detect recurring transactions
-        recurring_map = self._detect_recurring(transactions, recurring_window)
-        
-        # Prepare transaction data for multiprocessing (must be picklable)
+        recurring_map = self._detect_recurring(transactions, ctx["recurring_window"])
+
         tx_dicts = [
-            {
-                "id": t.id,
-                "party_name": t.party_name,
-                "description": t.description,
-                "amount": t.amount,
-                "date": t.date
-            }
+            {"id": t.id, "party_name": t.party_name, "description": t.description,
+             "amount": t.amount, "date": t.date}
             for t in transactions
         ]
-        
+
         from backend.services.tagging_worker import _process_transaction_batch
-        
+
         # Split transactions into chunks for the shared backend process pool.
         max_workers = process_pool_worker_count()
         chunk_size = max(1, len(tx_dicts) // max_workers)
         batches = [tx_dicts[i:i + chunk_size] for i in range(0, len(tx_dicts), chunk_size)]
-        
+
         all_tags_data = []
         completed = 0
         total_transactions = len(transactions)
-        
+
         worker_errors = []
         executor = get_process_pool()
         batch_sizes = {i: len(b) for i, b in enumerate(batches)}
         futures = {
             executor.submit(
                 _process_transaction_batch,
-                batch, clients, phone_map, broker_names, alias_list, alias_to_canonical,
-                suspicious_threshold, fuzzy_threshold, exclusions, common_words, recurring_map, suspicious_keywords
+                batch, clients, phone_map, ctx["broker_names"], ctx["alias_list"], ctx["alias_to_canonical"],
+                ctx["suspicious_threshold"], ctx["fuzzy_threshold"], ctx["exclusions"], ctx["common_words"],
+                recurring_map, ctx["suspicious_keywords"]
             ): i for i, batch in enumerate(batches)
         }
 
@@ -105,47 +129,8 @@ class TaggingService:
             self.db.rollback()
             raise RuntimeError(f"Auto-tagging failed in {len(worker_errors)} worker batch(es)")
 
-        # Bulk insert tags for massive speedup
-        new_tags = []
-        if all_tags_data:
-            from sqlalchemy import insert
-            # Replace auto-tags only after all workers have succeeded.
-            self.db.query(Tag).filter(
-                Tag.transaction_id.in_([t.id for t in transactions]),
-                Tag.is_manual == False
-            ).delete(synchronize_session=False)
-            self.db.flush()
-            # Bulk insert mapping
-            tag_mappings = []
-            for td in all_tags_data:
-                tag_mappings.append({
-                    "transaction_id": td["transaction_id"],
-                    "tag_type": td["tag_type"],
-                    "confidence": td["confidence"],
-                    "reason": td["reason"],
-                    "source": "auto",
-                    "is_manual": False
-                })
-            
-            # Execute bulk insert and get the inserted records to return
-            # Using core insert to be extremely fast, then we query them back
-            if tag_mappings:
-                self.db.execute(insert(Tag), tag_mappings)
-        else:
-            self.db.query(Tag).filter(
-                Tag.transaction_id.in_([t.id for t in transactions]),
-                Tag.is_manual == False
-            ).delete(synchronize_session=False)
-                
-        self.db.commit()
-        
-        # Retrieve the newly inserted tags to return
-        new_tags = self.db.query(Tag).filter(
-            Tag.transaction_id.in_([t.id for t in transactions]),
-            Tag.is_manual == False
-        ).all()
-        
-        return new_tags
+        tx_ids = [t.id for t in transactions]
+        return self._persist_auto_tags(tx_ids, all_tags_data)
 
     def auto_tag_transactions(
         self,
@@ -163,69 +148,32 @@ class TaggingService:
         if not transactions:
             return []
 
-        # Delegate to the same core logic via auto_tag_session helper
-        # Re-use session_id from the first transaction
-        session_id = transactions[0].session_id
-
-        # Load brokers and aliases
-        brokers = self.db.query(Broker).filter(Broker.is_active == True).all()
-        broker_names = [b.name for b in brokers]
-        alias_to_canonical = {}
-        for b in brokers:
-            for alias in (b.aliases or []):
-                broker_names.append(alias)
-                alias_to_canonical[alias] = b.name
-
-        aliases = self.db.query(Alias).all()
-        alias_list = [{"alias_name": a.alias_name, "canonical_name": a.canonical_name} for a in aliases]
-
-        session_settings = session_settings or {}
-        exclusions = self.config.get("broker_exclusions") or []
-        suspicious_threshold = float(session_settings.get("suspicious_threshold", self.config.get_threshold()))
-        fuzzy_threshold = self.config.get_fuzzy_threshold()
-        recurring_window = int(self.config.get("recurring_days_window") or 30)
-        suspicious_keywords = self.config.get("suspicious_keywords") or []
-        common_words = self.config.get("broker_common_words") or []
+        ctx = self._load_tagging_context(session_settings)
 
         phone_map = build_phone_map(clients)
-        recurring_map = self._detect_recurring(transactions, recurring_window)
+        recurring_map = self._detect_recurring(transactions, ctx["recurring_window"])
 
         tx_dicts = [
-            {"id": t.id, "party_name": t.party_name, "description": t.description, "amount": t.amount, "date": t.date}
+            {"id": t.id, "party_name": t.party_name, "description": t.description,
+             "amount": t.amount, "date": t.date}
             for t in transactions
         ]
 
         from backend.services.tagging_worker import _process_transaction_batch
-        max_workers = 1  # Small batch — single worker is fine
+        # Small batch — single worker is fine; no process-pool overhead.
         all_tags_data = _process_transaction_batch(
-            tx_dicts, clients, phone_map, broker_names, alias_list, alias_to_canonical,
-            suspicious_threshold, fuzzy_threshold, exclusions, common_words, recurring_map, suspicious_keywords,
+            tx_dicts, clients, phone_map, ctx["broker_names"], ctx["alias_list"], ctx["alias_to_canonical"],
+            ctx["suspicious_threshold"], ctx["fuzzy_threshold"], ctx["exclusions"], ctx["common_words"],
+            recurring_map, ctx["suspicious_keywords"],
         )
 
-        if all_tags_data:
-            from sqlalchemy import insert
-            self.db.query(Tag).filter(
-                Tag.transaction_id.in_(transaction_ids),
-                Tag.is_manual == False,
-            ).delete(synchronize_session=False)
-            self.db.flush()
-            self.db.execute(insert(Tag), [
-                {"transaction_id": td["transaction_id"], "tag_type": td["tag_type"],
-                 "confidence": td["confidence"], "reason": td["reason"],
-                 "source": "auto", "is_manual": False}
-                for td in all_tags_data
-            ])
-        self.db.commit()
-
-        return self.db.query(Tag).filter(
-            Tag.transaction_id.in_(transaction_ids), Tag.is_manual == False
-        ).all()
+        return self._persist_auto_tags(transaction_ids, all_tags_data)
 
     def _detect_recurring(self, transactions: List[Transaction], window_days: int) -> Dict[int, str]:
         """Detect recurring transactions by amount and party within a date window."""
         recurring: Dict[int, str] = {}
         groups = defaultdict(list)
-        
+
         def _parse_date(d: str | None):
             if not d:
                 return None
@@ -251,13 +199,13 @@ class TaggingService:
             if amount is None:
                 return "transaction"
             return "debit" if amount < 0 else "credit"
-        
+
         for tx in transactions:
             if tx.amount and tx.party_name:
                 # Key by rounded amount AND sign so credits and debits are separate
                 key = (round(tx.amount, 2), self.fuzzy.normalize_text(tx.party_name))
                 groups[key].append(tx)
-        
+
         for _key, txs in groups.items():
             if len(txs) < 2:
                 continue
@@ -288,10 +236,10 @@ class TaggingService:
             )
             for tx in recurring_txs:
                 recurring[tx.id] = reason
-        
+
         return recurring
-    
-    def add_manual_tag(self, transaction_id: int, tag_type: str, 
+
+    def add_manual_tag(self, transaction_id: int, tag_type: str,
                        reason: str = "", confidence: float = 1.0,
                        source: str = "manual", is_manual: bool = True,
                        commit: bool = True) -> Tag:
@@ -316,7 +264,7 @@ class TaggingService:
             self.db.commit()
             self.db.refresh(tag)
         return tag
-    
+
     def remove_tag(self, tag_id: int) -> bool:
         """Remove a tag."""
         tag = self.db.query(Tag).filter(Tag.id == tag_id).first()
@@ -325,28 +273,28 @@ class TaggingService:
             self.db.commit()
             return True
         return False
-    
+
     def bulk_remove_tags(self, tag_ids: List[int]) -> int:
         """Remove multiple tags."""
         count = self.db.query(Tag).filter(Tag.id.in_(tag_ids)).delete(synchronize_session=False)
         self.db.commit()
         return count
-    
+
     def get_tags_for_transaction(self, transaction_id: int) -> List[Tag]:
         """Get all tags for a transaction."""
         return self.db.query(Tag).filter(Tag.transaction_id == transaction_id).all()
-    
+
     def get_tag_summary(self, session_id: int) -> Dict[str, int]:
         """Get summary of tags in a session."""
         transactions = self.db.query(Transaction).filter(Transaction.session_id == session_id).all()
         tx_ids = [t.id for t in transactions]
-        
+
         tags = self.db.query(Tag).filter(Tag.transaction_id.in_(tx_ids)).all()
-        
+
         summary = {"client": 0, "broker": 0, "suspicious": 0, "total_tagged": 0,
                    "manual_tags": 0, "auto_tags": 0}
         tagged_txs = set()
-        
+
         for tag in tags:
             if tag.tag_type in summary:
                 summary[tag.tag_type] += 1
@@ -355,8 +303,8 @@ class TaggingService:
             else:
                 summary["auto_tags"] += 1
             tagged_txs.add(tag.transaction_id)
-        
+
         summary["total_tagged"] = len(tagged_txs)
         summary["total_transactions"] = len(transactions)
-        
+
         return summary
