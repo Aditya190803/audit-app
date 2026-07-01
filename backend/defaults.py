@@ -1,23 +1,13 @@
 # Default configuration values
-import os
-import sys
+from backend.brokers_list import BROKERS
+
 
 def _load_brokers():
-    backend_dir = os.path.dirname(os.path.abspath(__file__))
-    brokers_path = os.path.join(backend_dir, "brokers_list.py")
-    if os.path.exists(brokers_path):
-        sys.path.insert(0, backend_dir)
-        try:
-            from brokers_list import BROKERS
-            return sorted(BROKERS)
-        except ImportError:
-            pass
-    return []
+    return sorted(BROKERS)
 
 DEFAULT_CONFIGS = {
     "suspicious_threshold": 10000.0,
     "fuzzy_match_threshold": 0.75,
-    "tag_priority": ["client", "broker", "suspicious"],  # reserved for future use
     "name_normalization_rules": {
         "strip_extra_spaces": True,
         "lowercase": True,
