@@ -23,11 +23,14 @@ import { TagDetailDialog } from './TagDetailDialog'
 import { SessionSidebar } from './SessionSidebar'
 import { SessionToolbar } from './SessionToolbar'
 import { WelcomeScreen } from './WelcomeScreen'
+import { ConfirmDialog } from './ConfirmDialog'
+import type { AppUpdateStatus } from '../types/electron'
 
 export function AppShell() {
   const {
     sessions, currentSession, transactions, isLoading,
     setCurrentSession, loadSessions, refreshCurrentSession,
+    processingError, clearProcessingError,
   } = useSessionStore()
 
   const {
@@ -96,25 +99,25 @@ export function AppShell() {
     })
   }, [pushToast])
 
-  // Auto-update toast: when an update is downloaded, show a persistent toast
+  // Auto-update: when an update is downloaded (autoDownload is on), prompt
+  // the user with a restart dialog instead of a passive toast.
+  const [updatePrompt, setUpdatePrompt] = useState<AppUpdateStatus | null>(null)
   useEffect(() => {
     if (!window.electronAPI?.onUpdateStatus) return undefined
     return window.electronAPI.onUpdateStatus((status) => {
       if (status.status === 'downloaded') {
-        pushToast({
-          message: `Update v${status.version || 'new'} ready to install`,
-          type: 'update',
-          persistent: true,
-          action: {
-            label: 'Install & Restart',
-            onClick: () => {
-              window.electronAPI.installUpdate()
-            },
-          },
-        })
+        setUpdatePrompt(status)
       }
     })
-  }, [pushToast])
+  }, [])
+
+  const confirmInstallUpdate = () => {
+    const status = updatePrompt
+    setUpdatePrompt(null)
+    window.electronAPI?.installUpdate?.()
+    // If install doesn't quit immediately, keep the prompt dismissed; the app will quit when ready.
+    void status
+  }
 
   // Active view
   const [activeView, setActiveView] = useState<'data' | 'review' | 'activity'>('data')
@@ -282,6 +285,30 @@ export function AppShell() {
       {/* Bulk action floating bar */}
       <BulkActionBar />
       <TagDetailDialog />
+
+      {/* Update downloaded — prompt to restart and install */}
+      <ConfirmDialog
+        isOpen={updatePrompt !== null}
+        title="Update ready to install"
+        message={`A new version${updatePrompt?.version ? ` (v${updatePrompt.version})` : ''} has been downloaded. Restart the app now to apply the update?`}
+        confirmLabel="Restart & Install"
+        cancelLabel="Later"
+        onConfirm={confirmInstallUpdate}
+        onCancel={() => setUpdatePrompt(null)}
+      />
+
+      {/* Parse/processing error popup — surfaces backend failures instead of silently getting stuck */}
+      <ConfirmDialog
+        isOpen={processingError !== null}
+        title="Could not start the audit"
+        message={processingError ?? ''}
+        confirmLabel="OK"
+        cancelLabel="OK"
+        danger
+        onConfirm={clearProcessingError}
+        onCancel={clearProcessingError}
+      />
+
       <ToastContainer />
       <KeyboardShortcuts />
     </div>

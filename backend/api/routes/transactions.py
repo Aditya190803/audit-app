@@ -64,6 +64,17 @@ def _parse_passwords(password: Optional[str]) -> tuple[dict, Optional[str]]:
         pass  # single password fallback
     return {}, password
 
+def _is_encryption_error(exc: Exception) -> bool:
+    """PyMuPDF/pdfplumber raise ValueError when a PDF needs a password we don't have."""
+    return isinstance(exc, ValueError) and "encrypted" in str(exc).lower()
+
+def _password_protected_pdf_error(filenames: list[str]) -> HTTPException:
+    names = ", ".join(filenames)
+    return HTTPException(
+        status_code=400,
+        detail=f"Could not read password-protected PDF(s): {names}. Enter the correct password and try again.",
+    )
+
 @router.get("/parse-progress/{progress_id}")
 def get_parse_progress(progress_id: str):
     progress = _get_parse_progress(progress_id)
@@ -196,13 +207,19 @@ async def parse_files(
     
     # Parse client list (CSV or Excel)
     csv_service = CSVService()
-    clients = await run_in_threadpool(
-        csv_service.parse_client_list,
-        client_list_path,
-        sheet_name,
-        name_column,
-        True,
-    )
+    try:
+        clients = await run_in_threadpool(
+            csv_service.parse_client_list,
+            client_list_path,
+            sheet_name,
+            name_column,
+            True,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not read the client list file. Check that it is a valid CSV or Excel file with a name column. ({e})",
+        ) from e
     if not clients:
         raise HTTPException(status_code=400, detail="Client list did not contain any usable client names")
     _set_parse_progress(progress_id, 12, f"Loaded {len(clients)} clients.", "client_list")
@@ -241,6 +258,7 @@ async def parse_files(
     pdf_paths = []
     page_offset = 0
     parse_warnings = []
+    password_protected: list[str] = []
     
     for pdf_file in pdf:
         file_index = len(pdf_paths) + 1
@@ -281,7 +299,13 @@ async def parse_files(
                 total_pages=total,
             )
 
-        txns = await run_in_threadpool(pdf_service.parse_transactions, pdf_path, pdf_passwords.get(pdf_file.filename, password), bank_name, report_pdf_progress)
+        try:
+            txns = await run_in_threadpool(pdf_service.parse_transactions, pdf_path, pdf_passwords.get(pdf_file.filename, password), bank_name, report_pdf_progress)
+        except Exception as e:
+            if _is_encryption_error(e):
+                password_protected.append(pdf_file.filename)
+                continue
+            raise
         for warning in pdf_service.last_warnings:
             parse_warnings.append(f"{pdf_file.filename}: {warning}")
         for tx in txns:
@@ -290,7 +314,10 @@ async def parse_files(
             tx["pdf_filename"] = pdf_file.filename
             tx["payment_method"] = detect_payment_method(tx.get("description"), tx.get("party_name"))
         all_transactions.extend(txns)
-        page_offset += await run_in_threadpool(pdf_service.get_page_count, pdf_path, pdf_passwords.get(pdf_file.filename, password or ""))
+        try:
+            page_offset += await run_in_threadpool(pdf_service.get_page_count, pdf_path, pdf_passwords.get(pdf_file.filename, password or ""))
+        except Exception:
+            pass
         _set_parse_progress(
             progress_id,
             15 + int(file_index / max(len(pdf), 1) * 45),
@@ -301,6 +328,9 @@ async def parse_files(
             transactions_found=len(all_transactions),
         )
     
+    if password_protected:
+        raise _password_protected_pdf_error(password_protected)
+
     # Create session — run in threadpool to keep event loop free for SSE
     session_service = SessionService(db)
     config = ConfigService(db)
@@ -550,6 +580,7 @@ async def append_pdfs_to_session(
     pdf_service = PDFService()
     all_new_transactions = []
     new_pdf_paths: List[str] = []
+    password_protected: list[str] = []
 
     for i, pdf_file in enumerate(pdf):
         file_index = i + 1
@@ -567,13 +598,19 @@ async def append_pdfs_to_session(
         def report_pdf_progress(phase: str, done: int, total: int):
             pass  # sub-progress suppressed for simplicity
 
-        txns = await run_in_threadpool(
-            pdf_service.parse_transactions,
-            pdf_path,
-            pdf_passwords.get(pdf_file.filename, password),
-            bank_name,
-            report_pdf_progress,
-        )
+        try:
+            txns = await run_in_threadpool(
+                pdf_service.parse_transactions,
+                pdf_path,
+                pdf_passwords.get(pdf_file.filename, password),
+                bank_name,
+                report_pdf_progress,
+            )
+        except Exception as e:
+            if _is_encryption_error(e):
+                password_protected.append(pdf_file.filename)
+                continue
+            raise
         for warning in pdf_service.last_warnings:
             append_warnings.append(f"{pdf_file.filename}: {warning}")
         for tx in txns:
@@ -586,6 +623,9 @@ async def append_pdfs_to_session(
             f"Parsed PDF {file_index} of {len(pdf)} ({len(all_new_transactions)} new transactions).",
             "parsing_pdf",
         )
+
+    if password_protected:
+        raise _password_protected_pdf_error(password_protected)
 
     if not all_new_transactions:
         status = "completed_with_warnings" if append_warnings else "completed"
