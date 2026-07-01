@@ -65,7 +65,9 @@ app.add_middleware(
 # Global exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
+    import traceback
     print(f"[Backend Error] {exc}")
+    traceback.print_exc()
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error", "type": type(exc).__name__}

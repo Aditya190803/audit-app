@@ -86,3 +86,8 @@ example/**/*.csv
 # Site (Next.js sub-project)
 site/.next/
 site/node_modules/
+
+# Local review artifacts / release scratch
+review.md
+release-artifacts/
+scripts/upload-release.sh

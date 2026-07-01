@@ -86,8 +86,10 @@ export async function getTransactions(sessionId: number) {
   const all: Transaction[] = []
   const limit = TRANSACTION_BATCH_SIZE
   let offset = 0
+  // Safety cap so a malformed always-full response cannot loop forever.
+  const MAX_BATCHES = 1000
 
-  while (true) {
+  for (let batch = 0; batch < MAX_BATCHES; batch++) {
     const response = await client.get<Transaction[]>(`/transactions/session/${sessionId}`, {
       params: { limit, offset }
     })
@@ -97,6 +99,7 @@ export async function getTransactions(sessionId: number) {
     }
     offset += limit
   }
+  return { data: all, status: 200, statusText: 'OK', headers: {}, config: {} as never, totalCount: all.length }
 }
 
 export async function updateTransactionNotes(transactionId: number, notes: string) {

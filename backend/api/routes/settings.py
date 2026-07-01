@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from typing import Dict, Any
 from backend.database import get_db
 from backend.schemas import SettingsUpdate
 from backend.services.config_service import ConfigService

@@ -1,11 +1,8 @@
 import concurrent.futures
 import fitz  # PyMuPDF
-import pdfplumber
 import os
 from typing import List, Dict, Any, Optional, Callable
 import pytesseract
-from PIL import Image
-import io
 from backend.services.process_pool import get_process_pool
 
 class PDFService:
