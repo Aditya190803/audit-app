@@ -76,7 +76,6 @@ class PDFService:
                            bank_name: Optional[str] = None,
                            progress_callback: Optional[Callable[[str, int, int], None]] = None) -> List[Dict[str, Any]]:
         """Parse transactions from PDF using the parser registry."""
-        from backend.services.parsers import registry
         self.last_warnings = []
         def table_progress(done: int, total: int):
             if progress_callback:
@@ -88,7 +87,16 @@ class PDFService:
 
         tables = self.extract_tables(pdf_path, password, table_progress)
         pages = self.extract_text(pdf_path, password, text_progress)
+        return self.parse_from_extraction(tables, pages, bank_name)
 
+    def parse_from_extraction(self, tables: List[Dict[str, Any]], pages: List[Dict[str, Any]],
+                              bank_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Run the parser registry over pre-extracted tables/pages.
+
+        Used by parse_transactions (from disk) and by the pre-parse cache path
+        (which already has tables/pages in memory). Does not re-extract.
+        """
+        from backend.services.parsers import registry
         parser = None
         if bank_name:
             parser = registry.get_by_name(bank_name)

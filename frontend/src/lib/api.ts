@@ -129,6 +129,7 @@ export async function parseFiles(
     apCodes?: string[]
     bankName?: string
     progressId?: string
+    pdfHashes?: Record<string, string>
   } = {}
 ) {
   const client = await getClient()
@@ -149,11 +150,38 @@ export async function parseFiles(
   if (options.apCodes && options.apCodes.length > 0) {
     formData.append('ap_codes', JSON.stringify(options.apCodes))
   }
+  if (options.pdfHashes && Object.keys(options.pdfHashes).length > 0) {
+    formData.append('pdf_hashes', JSON.stringify(options.pdfHashes))
+  }
 
   return client.post('/transactions/parse', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 300000
   })
+}
+
+export interface PreParseResult {
+  file_hash: string
+  cached: boolean
+  page_count: number
+  warnings?: string[]
+}
+
+export async function preParsePdf(
+  file: File,
+  password?: string,
+  bankName?: string
+): Promise<PreParseResult> {
+  const client = await getClient()
+  const formData = new FormData()
+  formData.append('pdf', file)
+  if (password) formData.append('password', password)
+  if (bankName) formData.append('bank_name', bankName)
+  const res = await client.post<PreParseResult>('/transactions/preparse', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000
+  })
+  return res.data
 }
 
 export async function getParseProgress(progressId: string) {

@@ -1,11 +1,13 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useDropzone, type DropzoneState } from 'react-dropzone'
-import { FileText, FileSpreadsheet, Lock, X, ArrowRight } from 'lucide-react'
+import { FileText, FileSpreadsheet, Lock, X, ArrowRight, CheckCircle, Loader2, AlertCircle } from 'lucide-react'
+import type { PreParseFileState } from '../hooks/usePreParse'
 import { getParsers } from '../lib/api'
 import type { ParseProgress } from '../types/api'
 import { useSessionStore } from '../stores/sessionStore'
 import { useClientListPreview, isCsv, isExcel } from '../hooks/useClientListPreview'
 import { useApCodeSelection } from '../hooks/useApCodeSelection'
+import { usePreParse } from '../hooks/usePreParse'
 import { BrokerExclusionSelect } from './BrokerExclusionSelect'
 import { ParserSelect } from './ParserSelect'
 import { ApCodeSelect } from './ApCodeSelect'
@@ -22,6 +24,7 @@ interface FileDropZoneProps {
       excludedBrokers?: string[]
       apCodes?: string[]
       bankName?: string
+      pdfHashes?: Record<string, string>
     }
   ) => void
   isProcessing?: boolean
@@ -37,6 +40,20 @@ function formatFileSize(bytes: number): string {
 
 function isPdf(file: File): boolean {
   return file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf'
+}
+
+function PreParseStatusBadge({ state }: { state?: PreParseFileState }) {
+  if (!state) return null
+  switch (state.status) {
+    case 'parsing':
+      return <span className="inline-flex items-center gap-1 ml-1 text-[var(--text-tertiary)]"><Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} /> preparing…</span>
+    case 'ready':
+      return <span className="inline-flex items-center gap-1 ml-1 text-[var(--success)]"><CheckCircle className="h-3 w-3" strokeWidth={2} /> ready</span>
+    case 'password_required':
+      return <span className="inline-flex items-center gap-1 ml-1 text-[var(--danger)]"><Lock className="h-3 w-3" strokeWidth={2} /> needs password</span>
+    case 'error':
+      return <span className="inline-flex items-center gap-1 ml-1 text-[var(--danger)]" title={state.error}><AlertCircle className="h-3 w-3" strokeWidth={2} /> error</span>
+  }
 }
 
 function FileDropContainer({
@@ -164,6 +181,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
     sheetName: clientList.sheetName,
     headerRow: clientList.headerRow,
   })
+  const preParse = usePreParse()
 
   // Load parsers on mount
   useEffect(() => {
@@ -213,8 +231,10 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
         }
         return next
       })
+      // Kick off background pre-parse so Start is instant.
+      preParse.preParse(valid, undefined, bankName || undefined)
     }
-  }, [])
+  }, [preParse, bankName])
 
   const onDropAnyFiles = useCallback((acceptedFiles: File[]) => {
     addPdfFiles(acceptedFiles)
@@ -272,11 +292,13 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
         excludedBrokers?: string[]
         apCodes?: string[]
         bankName?: string
+        pdfHashes?: Record<string, string>
       } = {
         password: hasPasswords ? JSON.stringify(passwords) : undefined,
         excludedBrokers: excludedBrokers.size > 0 ? Array.from(excludedBrokers) : undefined,
         apCodes: apCode.apCodeEnabled && apCode.selectedApCodes.size > 0 ? Array.from(apCode.selectedApCodes) : undefined,
-        bankName: bankName || undefined
+        bankName: bankName || undefined,
+        pdfHashes: preParse.readyHashes()
       }
       if (isExcel(clientList.clientListFile) && clientList.sheetName.trim()) {
         options.sheetName = clientList.sheetName.trim()
@@ -382,7 +404,10 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
                   <p className={`text-sm font-medium truncate ${isInvalid ? 'text-[var(--danger)] line-through' : 'text-[var(--text-primary)]'}`}>
                     {f.name}
                   </p>
-                  <p className="text-xs text-[var(--text-tertiary)]">{formatFileSize(f.size)}{isInvalid ? ' — invalid PDF' : ''}</p>
+                  <p className="text-xs text-[var(--text-tertiary)]">
+                    {formatFileSize(f.size)}{isInvalid ? ' — invalid PDF' : ''}
+                    {!isInvalid && <PreParseStatusBadge state={preParse.states[f.name]} />}
+                  </p>
                 </div>
                 <button
                   onClick={() => setShowPassword(!showPassword)}
@@ -417,6 +442,10 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
                     placeholder="Enter password"
                     value={passwords[f.name] || ''}
                     onChange={(e) => setPasswords((prev) => ({ ...prev, [f.name]: e.target.value }))}
+                    onBlur={() => {
+                      const pw = passwords[f.name]
+                      if (pw) preParse.rePreParse(f, pw, bankName || undefined)
+                    }}
                     className="input-field w-40 text-xs"
                   />
                 </div>

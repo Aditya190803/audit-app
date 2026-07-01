@@ -1,4 +1,6 @@
 import unittest
+import os
+import tempfile
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -6,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from backend.api.routes.sessions import router as sessions_router
 from backend.api.routes.transactions import _is_encryption_error, _password_protected_pdf_error
 from backend.database import Base
+from backend.services.draft_cache import DraftCache
 from backend.services.session_service import SessionService
 
 
@@ -20,6 +23,30 @@ class PasswordProtectedPdfErrorTests(unittest.TestCase):
         self.assertEqual(err.status_code, 400)
         self.assertIn("a.pdf", err.detail)
         self.assertIn("b.pdf", err.detail)
+
+
+class DraftCacheTests(unittest.TestCase):
+    def _write_tmp(self, content: bytes) -> str:
+        fd, path = tempfile.mkstemp(suffix=".bin")
+        with os.fdopen(fd, "wb") as f:
+            f.write(content)
+        self.addCleanup(os.remove, path)
+        return path
+
+    def test_put_get_roundtrip_and_miss(self):
+        cache = DraftCache()
+        path = self._write_tmp(b"hello")
+        h = cache.file_hash(path)
+        cache.put(h, [{"t": 1}], [{"p": 1}], 3, path)
+        got = cache.get(h)
+        self.assertIsNotNone(got)
+        self.assertEqual(got["tables"], [{"t": 1}])
+        self.assertEqual(got["page_count"], 3)
+        self.assertIsNone(cache.get("nonexistent"))
+
+    def test_password_changes_hash(self):
+        path = self._write_tmp(b"data")
+        self.assertNotEqual(DraftCache.file_hash(path), DraftCache.file_hash(path, "secret"))
 
 
 class RouteOrderTests(unittest.TestCase):

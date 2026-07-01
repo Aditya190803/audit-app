@@ -27,6 +27,7 @@ from backend.services.upload_service import (
     PDF_EXTENSIONS,
     save_upload,
 )
+from backend.services.draft_cache import draft_cache
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -158,6 +159,48 @@ def list_parsers():
     from backend.services.parsers import registry
     return registry.parser_list()
 
+@router.post("/preparse")
+async def preparse_pdf(
+    pdf: UploadFile = File(...),
+    password: Optional[str] = Form(None),
+    bank_name: Optional[str] = Form(None),
+):
+    """Pre-extract tables + text from a dropped PDF so Start is instant.
+
+    Does NOT run the parser or create a session — just caches the expensive
+    extraction keyed by file hash + password. Password-protected PDFs that
+    cannot be opened return HTTP 400 so the frontend can prompt at drop time.
+    """
+    pdf_passwords, single_password = _parse_passwords(password)
+    pw = pdf_passwords.get(pdf.filename, single_password)
+    saved_path = _save_upload_file(pdf, PDF_EXTENSIONS)
+    file_hash = draft_cache.file_hash(saved_path, pw)
+
+    cached = draft_cache.get(file_hash)
+    if cached:
+        return {"file_hash": file_hash, "cached": True, "page_count": cached["page_count"]}
+
+    pdf_service = PDFService()
+    try:
+        tables = await run_in_threadpool(pdf_service.extract_tables, saved_path, pw, None)
+        pages = await run_in_threadpool(pdf_service.extract_text, saved_path, pw, None)
+        page_count = await run_in_threadpool(pdf_service.get_page_count, saved_path, pw or "")
+    except Exception as e:
+        if _is_encryption_error(e):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not read password-protected PDF: {pdf.filename}. Enter the correct password and try again.",
+            ) from e
+        raise
+
+    draft_cache.put(file_hash, tables, pages, page_count, saved_path)
+    return {
+        "file_hash": file_hash,
+        "cached": False,
+        "page_count": page_count,
+        "warnings": list(pdf_service.last_warnings),
+    }
+
 def _clean_response_text(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
@@ -194,11 +237,22 @@ async def parse_files(
     ap_codes: Optional[str] = Form(None),
     bank_name: Optional[str] = Form(None),
     progress_id: Optional[str] = Form(None),
+    pdf_hashes: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     """Parse one or more PDFs and client list, create session, and auto-tag transactions."""
     _set_parse_progress(progress_id, 1, "Preparing files...", "preparing")
     pdf_passwords, password = _parse_passwords(password)
+    # Optional pre-parse cache: {filename -> file_hash} from the frontend's preparse step.
+    # Files present in the cache skip the slow extract_tables/extract_text step.
+    hash_by_filename: Dict[str, str] = {}
+    if pdf_hashes:
+        try:
+            parsed_hashes = json.loads(pdf_hashes)
+            if isinstance(parsed_hashes, dict):
+                hash_by_filename = parsed_hashes
+        except (json.JSONDecodeError, TypeError):
+            pass  # ignore malformed; fall back to full extract
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     
     # Save client list
@@ -299,8 +353,15 @@ async def parse_files(
                 total_pages=total,
             )
 
+        # Fast path: pre-parse cache hit -> skip extraction, run parser on cached tables/pages.
+        cached = draft_cache.get(hash_by_filename.get(pdf_file.filename, "")) if pdf_file.filename in hash_by_filename else None
         try:
-            txns = await run_in_threadpool(pdf_service.parse_transactions, pdf_path, pdf_passwords.get(pdf_file.filename, password), bank_name, report_pdf_progress)
+            if cached:
+                txns = await run_in_threadpool(pdf_service.parse_from_extraction, cached["tables"], cached["pages"], bank_name)
+                this_page_count = cached["page_count"]
+            else:
+                txns = await run_in_threadpool(pdf_service.parse_transactions, pdf_path, pdf_passwords.get(pdf_file.filename, password), bank_name, report_pdf_progress)
+                this_page_count = await run_in_threadpool(pdf_service.get_page_count, pdf_path, pdf_passwords.get(pdf_file.filename, password or ""))
         except Exception as e:
             if _is_encryption_error(e):
                 password_protected.append(pdf_file.filename)
@@ -314,10 +375,7 @@ async def parse_files(
             tx["pdf_filename"] = pdf_file.filename
             tx["payment_method"] = detect_payment_method(tx.get("description"), tx.get("party_name"))
         all_transactions.extend(txns)
-        try:
-            page_offset += await run_in_threadpool(pdf_service.get_page_count, pdf_path, pdf_passwords.get(pdf_file.filename, password or ""))
-        except Exception:
-            pass
+        page_offset += this_page_count
         _set_parse_progress(
             progress_id,
             15 + int(file_index / max(len(pdf), 1) * 45),

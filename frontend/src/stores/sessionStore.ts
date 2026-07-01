@@ -27,6 +27,7 @@ interface SessionState {
       excludedBrokers?: string[]
       apCodes?: string[]
       bankName?: string
+      pdfHashes?: Record<string, string>
     }
   ) => Promise<number | null>
   deleteSession: (sessionId: number) => Promise<void>
