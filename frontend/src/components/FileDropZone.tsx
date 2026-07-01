@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useDropzone, type DropzoneState } from 'react-dropzone'
-import { FileText, FileSpreadsheet, Lock, X, ArrowRight, ChevronDown, Search, Check } from 'lucide-react'
+import { FileText, FileSpreadsheet, Lock, X, ArrowRight } from 'lucide-react'
 import { getParsers } from '../lib/api'
 import type { ParseProgress } from '../types/api'
 import { useSessionStore } from '../stores/sessionStore'
@@ -8,6 +8,7 @@ import { useClientListPreview, isCsv, isExcel } from '../hooks/useClientListPrev
 import { useApCodeSelection } from '../hooks/useApCodeSelection'
 import { BrokerExclusionSelect } from './BrokerExclusionSelect'
 import { ParserSelect } from './ParserSelect'
+import { ApCodeSelect } from './ApCodeSelect'
 
 interface FileDropZoneProps {
   onFilesSelected?: (
@@ -515,151 +516,22 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
 
       {/* AP Code filtering */}
       {clientList.nameColumn && (
-        <div className="border-t border-[var(--border)] pt-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-[var(--text-primary)]">
-              AP Code Available
-            </label>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={apCode.apCodeEnabled}
-              onClick={() => {
-                apCode.setApCodeEnabled((v) => !v)
-                if (apCode.apCodeEnabled) {
-                  apCode.setSelectedApCodes(new Set())
-                }
-              }}
-              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:ring-offset-2 ${
-                apCode.apCodeEnabled ? 'bg-[var(--primary)]' : 'bg-[var(--border-strong)]'
-              }`}
-            >
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ${
-                apCode.apCodeEnabled ? 'translate-x-4' : 'translate-x-0'
-              }`} />
-            </button>
-          </div>
-
-          {apCode.apCodeEnabled && apCode.apCodeColumn && (
-            <div>
-              <label className="block text-xs font-medium text-[var(--text-tertiary)] mb-1.5 uppercase tracking-wider">
-                AP Code Column
-              </label>
-              <select
-                value={apCode.apCodeColumn}
-                onChange={(e) => apCode.setApCodeColumn(e.target.value)}
-                className="input-field"
-              >
-                {clientList.detectedColumns.map((col) => (
-                  <option key={col} value={col}>{col}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {apCode.apCodeEnabled && (
-            <div className="relative" ref={apCode.apCodeDropdownRef}>
-              <label className="block text-xs font-medium text-[var(--text-tertiary)] mb-1.5 uppercase tracking-wider">
-                AP Codes <span className="text-xs font-normal normal-case text-[var(--text-tertiary)]">(select to include related clients)</span>
-              </label>
-              <button
-                onClick={() => {
-                  if (apCode.availableApCodes.length > 0) apCode.setApCodeDropdownOpen((o) => !o)
-                }}
-                disabled={apCode.apCodeLoading}
-                className={`w-full flex items-center justify-between px-3 py-2 bg-white border border-[var(--border-strong)] rounded-[var(--radius-md)] text-sm transition-colors duration-150 ${
-                  apCode.availableApCodes.length > 0 ? 'hover:border-[var(--primary)]' : 'opacity-60 cursor-not-allowed'
-                }`}
-              >
-                <span className={apCode.selectedApCodes.size > 0 ? 'text-[var(--text-primary)]' : 'text-[var(--text-tertiary)]'}>
-                  {apCode.apCodeLoading
-                    ? 'Loading...'
-                    : apCode.availableApCodes.length === 0
-                      ? apCode.apCodeColumn ? 'No AP codes found' : 'No AP code column detected'
-                      : apCode.selectedApCodes.size > 0
-                        ? `${apCode.selectedApCodes.size} AP code${apCode.selectedApCodes.size > 1 ? 's' : ''} selected`
-                        : `${apCode.availableApCodes.length} AP code${apCode.availableApCodes.length > 1 ? 's' : ''} available`}
-                </span>
-                {!apCode.apCodeLoading && apCode.availableApCodes.length > 0 && (
-                  <ChevronDown className={`h-4 w-4 text-[var(--text-tertiary)] transition-transform duration-150 ${apCode.apCodeDropdownOpen ? 'rotate-180' : ''}`} strokeWidth={2} />
-                )}
-              </button>
-
-              {apCode.apCodeDropdownOpen && apCode.availableApCodes.length > 0 && (
-                <div className="absolute z-20 mt-1 w-full bg-white border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-md)] overflow-hidden">
-                  <div className="p-2 border-b border-[var(--border)]">
-                    <div className="relative">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-tertiary)]" strokeWidth={1.5} />
-                      <input
-                        type="text"
-                        placeholder="Search AP codes..."
-                        value={apCode.apCodeSearch}
-                        onChange={(e) => apCode.setApCodeSearch(e.target.value)}
-                        className="w-full pl-8 pr-3 py-1.5 bg-[var(--bg)] border border-[var(--border)] rounded-[var(--radius-md)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent placeholder:text-[var(--text-tertiary)]"
-                        autoFocus
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between px-3 py-1.5 border-b border-[var(--border)] bg-[var(--bg)]">
-                    <button
-                      onClick={() => apCode.setSelectedApCodes(new Set(apCode.availableApCodes))}
-                      className="text-[11px] font-medium text-[var(--primary)] hover:underline"
-                    >
-                      Select all
-                    </button>
-                    <button
-                      onClick={() => apCode.setSelectedApCodes(new Set())}
-                      className="text-[11px] font-medium text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-                    >
-                      Clear all
-                    </button>
-                  </div>
-
-                  <div className="max-h-56 overflow-y-auto">
-                    {apCode.availableApCodes
-                      .filter((code) => code.toLowerCase().includes(apCode.apCodeSearch.toLowerCase()))
-                      .map((code) => {
-                        const isSelected = apCode.selectedApCodes.has(code)
-                        return (
-                          <button
-                            key={code}
-                            onClick={() => {
-                              apCode.setSelectedApCodes((prev) => {
-                                const next = new Set(prev)
-                                if (next.has(code)) next.delete(code)
-                                else next.add(code)
-                                return next
-                              })
-                            }}
-                            className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors duration-150 ${
-                              isSelected ? 'bg-[var(--primary-subtle)] text-[var(--primary)]' : 'text-[var(--text-primary)] hover:bg-[var(--surface-hover)]'
-                            }`}
-                          >
-                            <span className={`h-4 w-4 rounded-[var(--radius-sm)] border flex items-center justify-center shrink-0 transition-colors duration-150 ${
-                              isSelected ? 'border-[var(--primary)] bg-[var(--primary)]' : 'border-[var(--border-strong)]'
-                            }`}>
-                              {isSelected && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
-                            </span>
-                            <span className="truncate">{code}</span>
-                          </button>
-                        )
-                      })}
-                    {apCode.availableApCodes.filter((code) => code.toLowerCase().includes(apCode.apCodeSearch.toLowerCase())).length === 0 && (
-                      <div className="px-3 py-4 text-sm text-[var(--text-tertiary)] text-center">
-                        No AP codes match your search
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="px-3 py-1.5 border-t border-[var(--border)] bg-[var(--bg)] text-[11px] text-[var(--text-tertiary)] text-center">
-                    {apCode.selectedApCodes.size} of {apCode.availableApCodes.length} selected · Clients without AP code always included
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        <ApCodeSelect
+          apCodeEnabled={apCode.apCodeEnabled}
+          setApCodeEnabled={apCode.setApCodeEnabled}
+          apCodeColumn={apCode.apCodeColumn}
+          setApCodeColumn={apCode.setApCodeColumn}
+          availableApCodes={apCode.availableApCodes}
+          selectedApCodes={apCode.selectedApCodes}
+          setSelectedApCodes={apCode.setSelectedApCodes}
+          apCodeDropdownOpen={apCode.apCodeDropdownOpen}
+          setApCodeDropdownOpen={apCode.setApCodeDropdownOpen}
+          apCodeSearch={apCode.apCodeSearch}
+          setApCodeSearch={apCode.setApCodeSearch}
+          apCodeLoading={apCode.apCodeLoading}
+          apCodeDropdownRef={apCode.apCodeDropdownRef}
+          detectedColumns={clientList.detectedColumns}
+        />
       )}
 
       {/* Bank selection */}
