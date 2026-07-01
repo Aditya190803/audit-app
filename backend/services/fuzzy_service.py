@@ -84,8 +84,15 @@ class FuzzyService:
         if common_words is None:
             common_words = COMMON_WORDS
 
+        if self._is_person_like_broker_name(broker_name):
+            return False
+
         compact_text = self.normalize_compact(text)
         if len(compact_text) < 6:
+            return False
+
+        has_brand_in_text = any(brand in compact_text for brand in BROKER_BRAND_TOKENS)
+        if len(compact_text) < 10 and not has_brand_in_text:
             return False
 
         compact_broker = self.normalize_compact(broker_name)
@@ -120,15 +127,15 @@ class FuzzyService:
             if not any(brand in compact_text for brand in sig & BROKER_BRAND_TOKENS):
                 return False
         else:
-            joined_sig = "".join(sorted(sig))
-            if len(joined_sig) >= 6 and joined_sig not in compact_text and joined_sig not in text_stripped:
-                if broker_stripped not in compact_text and compact_text not in broker_stripped:
-                    return False
+            return False
 
-        broker_tokens = self.normalize_text(broker_name).split()
-        if set(broker_tokens) & BROKER_ENTITY_WORDS:
+        if sig & BROKER_BRAND_TOKENS and any(brand in compact_text for brand in sig & BROKER_BRAND_TOKENS):
             return True
-        return bool(sig & BROKER_BRAND_TOKENS) or len(distinctive) >= 1
+        if len(distinctive) >= 2:
+            return True
+        if len(distinctive) == 1 and fuzz.ratio(text_stripped, broker_stripped) / 100.0 >= 0.92:
+            return True
+        return False
 
     def find_matches(self, text: str, candidates: List[str], 
                     limit: int = 5) -> List[Dict[str, Any]]:
@@ -150,10 +157,10 @@ class FuzzyService:
             token_score = fuzz.token_sort_ratio(normalized_text, normalized) / 100.0
             token_set_score = fuzz.token_set_ratio(normalized_text, normalized) / 100.0
             wratio_score = fuzz.WRatio(normalized_text, normalized) / 100.0
-            compact_text = self.normalize_compact(text)
-            compact_broker = self.normalize_compact(original)
             compact_score = 0.0
-            if len(compact_text) >= 6 and len(compact_broker) >= 6:
+            if self._broker_spaced_name_compact_match(text, original, COMMON_WORDS):
+                compact_text = self.normalize_compact(text)
+                compact_broker = self.normalize_compact(original)
                 compact_score = max(
                     fuzz.ratio(compact_text, compact_broker) / 100.0,
                     fuzz.partial_ratio(compact_text, self._strip_compact_legal_suffix(compact_broker)) / 100.0,
