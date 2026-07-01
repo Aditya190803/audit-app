@@ -59,6 +59,39 @@ class TaggingServiceTests(unittest.TestCase):
         self.assertEqual(tags[0]["tag_type"], "suspicious")
         self.assertEqual(tags[0]["reason"], reason)
 
+    def test_tag_priority_decides_which_match_wins(self):
+        # Same tx matches both broker (ZERODHA) and suspicious (high amount).
+        # tag_priority picks the winner; the losing stage never re-evaluates it.
+        batch = [{
+            "id": 1,
+            "party_name": "ZERODHA",
+            "description": "NEFT to ZERODHA",
+            "amount": -60000,
+            "date": "2025-01-01",
+        }]
+        common = dict(
+            batch=batch,
+            clients=[],
+            phone_map={},
+            broker_names=["ZERODHA"],
+            alias_list=[],
+            alias_to_canonical={},
+            suspicious_threshold=10000,
+            fuzzy_threshold=0.75,
+            exclusions=[],
+            common_words=[],
+            recurring_map={},
+            suspicious_keywords=[],
+        )
+
+        broker_first = _process_transaction_batch(tag_priority=["broker", "suspicious"], **common)
+        self.assertEqual(broker_first[0]["tag_type"], "broker")
+        self.assertEqual(len(broker_first), 1)  # suspicious stage skipped
+
+        suspicious_first = _process_transaction_batch(tag_priority=["suspicious", "broker"], **common)
+        self.assertEqual(suspicious_first[0]["tag_type"], "suspicious")
+        self.assertEqual(len(suspicious_first), 1)  # broker stage skipped
+
     def test_auto_tag_worker_failure_keeps_existing_auto_tags(self):
         tx = Transaction(session_id=1, date="2026-01-01", amount=-1000, party_name="CLIENT ONE")
         self.db.add(tx)

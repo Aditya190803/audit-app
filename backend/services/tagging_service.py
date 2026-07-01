@@ -45,6 +45,7 @@ class TaggingService:
             "recurring_window": int(self.config.get("recurring_days_window") or 30),
             "suspicious_keywords": self.config.get("suspicious_keywords") or [],
             "common_words": self.config.get("broker_common_words") or [],
+            "tag_priority": self.config.get("tag_priority") or ["client", "broker", "suspicious"],
         }
 
     def _persist_auto_tags(self, transaction_ids: List[int], tags_data: List[Dict[str, Any]]) -> List[Tag]:
@@ -109,7 +110,7 @@ class TaggingService:
                 _process_transaction_batch,
                 batch, clients, phone_map, ctx["broker_names"], ctx["alias_list"], ctx["alias_to_canonical"],
                 ctx["suspicious_threshold"], ctx["fuzzy_threshold"], ctx["exclusions"], ctx["common_words"],
-                recurring_map, ctx["suspicious_keywords"]
+                recurring_map, ctx["suspicious_keywords"], ctx["tag_priority"]
             ): i for i, batch in enumerate(batches)
         }
 
@@ -164,7 +165,7 @@ class TaggingService:
         all_tags_data = _process_transaction_batch(
             tx_dicts, clients, phone_map, ctx["broker_names"], ctx["alias_list"], ctx["alias_to_canonical"],
             ctx["suspicious_threshold"], ctx["fuzzy_threshold"], ctx["exclusions"], ctx["common_words"],
-            recurring_map, ctx["suspicious_keywords"],
+            recurring_map, ctx["suspicious_keywords"], ctx["tag_priority"],
         )
 
         return self._persist_auto_tags(transaction_ids, all_tags_data)

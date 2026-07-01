@@ -8,6 +8,7 @@ def _load_brokers():
 DEFAULT_CONFIGS = {
     "suspicious_threshold": 10000.0,
     "fuzzy_match_threshold": 0.75,
+    "tag_priority": ["client", "broker", "suspicious"],  # first matching tag type wins; lower-priority stages never re-evaluate a tagged tx
     "name_normalization_rules": {
         "strip_extra_spaces": True,
         "lowercase": True,
