@@ -413,6 +413,9 @@ async function createWindow(): Promise<void> {
     minHeight: 720,
     show: true,
     autoHideMenuBar: true,
+    // Dev: show the app icon in the taskbar/alt-tab. Packaged Windows builds
+    // inherit the .exe icon (embedded by rcedit from win.icon) automatically.
+    icon: app.isPackaged ? undefined : path.join(APP_ROOT, 'build', 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
