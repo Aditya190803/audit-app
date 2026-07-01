@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import time
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import StreamingResponse
@@ -48,6 +47,22 @@ def _save_upload_file(upload_file: UploadFile, allowed_extensions: set[str]) -> 
         allowed_extensions=allowed_extensions,
         max_bytes=MAX_UPLOAD_BYTES,
     )
+
+def _parse_passwords(password: Optional[str]) -> tuple[dict, Optional[str]]:
+    """Split the password form field into (per-file map, single fallback).
+
+    The frontend sends either one password string or a JSON map of
+    {filename: password}. Returns ({}, password) when no map is present.
+    """
+    if not password:
+        return {}, None
+    try:
+        parsed = json.loads(password)
+        if isinstance(parsed, dict):
+            return parsed, None
+    except (json.JSONDecodeError, TypeError):
+        pass  # single password fallback
+    return {}, password
 
 @router.get("/parse-progress/{progress_id}")
 def get_parse_progress(progress_id: str):
@@ -172,16 +187,7 @@ async def parse_files(
 ):
     """Parse one or more PDFs and client list, create session, and auto-tag transactions."""
     _set_parse_progress(progress_id, 1, "Preparing files...", "preparing")
-    # Parse per-file passwords if sent as JSON map
-    pdf_passwords: dict = {}
-    if password:
-        try:
-            parsed = json.loads(password)
-            if isinstance(parsed, dict):
-                pdf_passwords = parsed
-                password = None  # use per-file passwords
-        except (json.JSONDecodeError, TypeError):
-            pass  # single password fallback
+    pdf_passwords, password = _parse_passwords(password)
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     
     # Save client list
@@ -526,15 +532,7 @@ async def append_pdfs_to_session(
     session_service.mark_session_status(session_id, "active")
     _set_parse_progress(progress_id, 1, "Preparing files…", "preparing")
 
-    pdf_passwords: dict = {}
-    if password:
-        try:
-            parsed = json.loads(password)
-            if isinstance(parsed, dict):
-                pdf_passwords = parsed
-                password = None
-        except (json.JSONDecodeError, TypeError):
-            pass
+    pdf_passwords, password = _parse_passwords(password)
 
     # Load existing client list from session
     csv_service = CSVService()
