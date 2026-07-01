@@ -126,7 +126,7 @@ function cmdReleaseWin() {
   console.log(`[local] UPDATE_FEED_URL=${env.UPDATE_FEED_URL}`)
   run('release:check', 'bun', ['run', 'release:check'], env)
   run('verify:prod', 'bun', ['run', 'verify:prod'], env)
-  run('electron-builder', 'npx', ['electron-builder', '--win', '--x64', '--publish', 'never'], env)
+  run('electron-builder', 'bunx', ['electron-builder', '--win', '--x64', '--publish', 'never'], env)
   console.log('\n[local] Installer: out/dist/*.exe')
 }
 
@@ -135,7 +135,7 @@ function cmdBuildApp() {
   const env = defaultEnv()
   run('electron-vite build', 'bun', ['run', 'build'], env)
   run('PyInstaller', 'node', ['scripts/build-python.js'], env)
-  run('electron-builder', 'npx', ['electron-builder', '--win', '--x64', '--publish', 'never'], env)
+  run('electron-builder', 'bunx', ['electron-builder', '--win', '--x64', '--publish', 'never'], env)
 }
 
 const commands = {
