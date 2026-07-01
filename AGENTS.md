@@ -2,6 +2,8 @@
 
 This repo is **Bank Audit App** (`aditya190803/audit-app`): Electron + Python (FastAPI), Windows installer via GitHub Actions on version tags.
 
+**Package manager:** [Bun](https://bun.sh) only (`bun install`, `bun run …`, lockfile `bun.lock`). Do not add `pnpm-workspace.yaml` or pnpm lockfiles; CI and local release scripts use Bun.
+
 ## Release philosophy (faster, fewer surprises)
 
 **Do expensive work once on your machine, then tag.** Pushing `v*.*.*` triggers CI that repeats tests + PyInstaller + NSIS (~10–12 minutes). That is wasteful if you have not already validated locally.
