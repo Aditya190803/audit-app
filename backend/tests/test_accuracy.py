@@ -164,6 +164,17 @@ class AccuracyTests(unittest.TestCase):
             "RAISE SECURITIES PRIVATE LIMITED",
         )
 
+    def test_broker_matching_handles_spaced_vs_concatenated_brand_names(self):
+        fuzzy = FuzzyService(0.75)
+        self.assertEqual(
+            fuzzy.match_broker_names("SHARE KHAN LTD", BROKERS)[0]["original"],
+            "SHAREKHAN LIMITED",
+        )
+        self.assertEqual(
+            fuzzy.match_broker_names("NEFT-CR-SHARE KHAN LIMITED", BROKERS)[0]["original"],
+            "SHAREKHAN LIMITED",
+        )
+
     def test_broker_matching_handles_concatenated_broker_names(self):
         fuzzy = FuzzyService(0.75)
         narration = "RTGS-HDFCR52026010352880424- SMCGLOBALSECURITIESLTDDSCN5218- 57500001265218-HDFC0000240"

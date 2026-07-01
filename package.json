@@ -1,6 +1,6 @@
 {
   "name": "bank-audit-app",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "description": "Bank Statement Auditing App",
   "main": "./out/main/main.js",
   "author": "SKA Auditing",
@@ -22,6 +22,9 @@
     "test:backend": "node scripts/test-backend.js",
     "test": "bun run typecheck && bun run test:frontend && bun run test:backend",
     "verify:prod": "node scripts/verify-production.js",
+    "release:win:local": "node scripts/local-release.js release-win",
+    "release:local:test": "node scripts/local-release.js test",
+    "release:local:deps": "node scripts/local-release.js deps",
     "package:ci:win": "electron-builder --win --x64 --publish never",
     "package:ci:mac:arm64": "electron-builder --mac --arm64 --publish never",
     "package:ci:mac:x64": "electron-builder --mac --x64 --publish never",

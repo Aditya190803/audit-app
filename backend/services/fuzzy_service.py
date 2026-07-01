@@ -65,6 +65,71 @@ class FuzzyService:
         text = ' '.join(text.split())
         return text
     
+
+    def normalize_compact(self, text: str) -> str:
+        """Alphanumeric-only form for spaced vs concatenated names (e.g. share khan vs sharekhan)."""
+        return re.sub(r"[^a-z0-9]", "", self.normalize_text(text))
+
+    def _compact_suffixes(self) -> Tuple[str, ...]:
+        return ("limited", "ltd", "private", "pvt", "llp", "plc")
+
+    def _strip_compact_legal_suffix(self, compact: str) -> str:
+        for suffix in self._compact_suffixes():
+            if compact.endswith(suffix) and len(compact) > len(suffix) + 3:
+                return compact[: -len(suffix)]
+        return compact
+
+    def _broker_spaced_name_compact_match(self, text: str, broker_name: str, common_words: set = None) -> bool:
+        """Match narrations where brand tokens are split (SHARE KHAN LTD vs SHAREKHAN LIMITED)."""
+        if common_words is None:
+            common_words = COMMON_WORDS
+
+        compact_text = self.normalize_compact(text)
+        if len(compact_text) < 6:
+            return False
+
+        compact_broker = self.normalize_compact(broker_name)
+        if len(compact_broker) < 6:
+            return False
+
+        broker_stripped = self._strip_compact_legal_suffix(compact_broker)
+        text_stripped = self._strip_compact_legal_suffix(compact_text)
+
+        scores = [
+            fuzz.ratio(compact_text, compact_broker) / 100.0,
+            fuzz.ratio(text_stripped, broker_stripped) / 100.0,
+            fuzz.partial_ratio(compact_text, broker_stripped) / 100.0,
+            fuzz.partial_ratio(text_stripped, compact_broker) / 100.0,
+        ]
+        if max(scores) < 0.86:
+            return False
+
+        sig = self._get_significant_tokens(broker_name, common_words, for_broker=True)
+        if not sig:
+            return False
+
+        distinctive = [
+            t for t in sig
+            if t not in BROKER_ENTITY_WORDS and t not in BANK_ONLY_TOKENS and t not in common_words
+        ]
+        if distinctive:
+            if not any(t in compact_text for t in distinctive):
+                if not any(t in text_stripped for t in distinctive):
+                    return False
+        elif sig & BROKER_BRAND_TOKENS:
+            if not any(brand in compact_text for brand in sig & BROKER_BRAND_TOKENS):
+                return False
+        else:
+            joined_sig = "".join(sorted(sig))
+            if len(joined_sig) >= 6 and joined_sig not in compact_text and joined_sig not in text_stripped:
+                if broker_stripped not in compact_text and compact_text not in broker_stripped:
+                    return False
+
+        broker_tokens = self.normalize_text(broker_name).split()
+        if set(broker_tokens) & BROKER_ENTITY_WORDS:
+            return True
+        return bool(sig & BROKER_BRAND_TOKENS) or len(distinctive) >= 1
+
     def find_matches(self, text: str, candidates: List[str], 
                     limit: int = 5) -> List[Dict[str, Any]]:
         """Find fuzzy matches for text against candidates."""
@@ -85,7 +150,15 @@ class FuzzyService:
             token_score = fuzz.token_sort_ratio(normalized_text, normalized) / 100.0
             token_set_score = fuzz.token_set_ratio(normalized_text, normalized) / 100.0
             wratio_score = fuzz.WRatio(normalized_text, normalized) / 100.0
-            score = max(token_score, token_set_score, wratio_score, partial_score * 0.95)
+            compact_text = self.normalize_compact(text)
+            compact_broker = self.normalize_compact(original)
+            compact_score = 0.0
+            if len(compact_text) >= 6 and len(compact_broker) >= 6:
+                compact_score = max(
+                    fuzz.ratio(compact_text, compact_broker) / 100.0,
+                    fuzz.partial_ratio(compact_text, self._strip_compact_legal_suffix(compact_broker)) / 100.0,
+                )
+            score = max(token_score, token_set_score, wratio_score, partial_score * 0.95, compact_score)
             
             if score >= self.threshold:
                 matches.append({
@@ -341,6 +414,8 @@ class FuzzyService:
 
     def _has_significant_match(self, text: str, broker_name: str, common_words: set = None) -> bool:
         """Check if text has a fuzzy match for at least one significant broker token."""
+        if self._broker_spaced_name_compact_match(text, broker_name, common_words):
+            return True
         if self._broker_compact_evidence(text, broker_name, common_words):
             return True
 
