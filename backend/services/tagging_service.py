@@ -2,10 +2,9 @@ from sqlalchemy.orm import Session
 from backend.models import Transaction, Tag, Broker, Alias, AuditSession
 from backend.services.fuzzy_service import FuzzyService
 from backend.services.config_service import ConfigService
-from backend.services.parsers.base import BaseParser
+from backend.services.phone import build_phone_map
 from typing import List, Dict, Any, Optional, Callable
 from collections import defaultdict
-import re
 from datetime import datetime
 import concurrent.futures
 from backend.services.process_pool import get_process_pool, process_pool_worker_count
@@ -15,104 +14,7 @@ class TaggingService:
         self.db = db
         self.config = ConfigService(db)
         self.fuzzy = FuzzyService(threshold=self.config.get_fuzzy_threshold())
-    
-    @staticmethod
-    def _normalize_phone(phone: str) -> str | None:
-        digits = re.sub(r'\D', '', phone)
-        if len(digits) == 10:
-            return digits
-        if len(digits) == 11 and digits.startswith('0'):
-            return digits[1:]
-        if len(digits) == 12 and digits.startswith('91'):
-            return digits[2:]
-        if len(digits) > 10:
-            return digits[-10:]
-        return None
 
-    @staticmethod
-    def _build_phone_map(clients: List[Dict[str, Any]]) -> Dict[str, List[str]]:
-        phone_map: Dict[str, List[str]] = {}
-        for c in clients:
-            raw = c.get('raw_data', {})
-            for key, val in raw.items():
-                k = str(key).lower().strip()
-                v = str(val).strip()
-                if any(kw in k for kw in ['phone', 'mobile', 'cell', 'telephone', 'contact_no', 'contact']):
-                    if v and v.lower() not in ('nan', '', 'none', 'null'):
-                        normalized = TaggingService._normalize_phone(v)
-                        if normalized:
-                            phone_map.setdefault(normalized, []).append(c['name'])
-        return phone_map
-
-    @staticmethod
-    def _extract_phone_candidates(text: str) -> List[str]:
-        if not text:
-            return []
-        # Strip out obvious non-phone patterns before extracting digits
-        cleaned = re.sub(r'(?:UPI|IMPS|NEFT|RTGS|MMT|UPIAB|UPIAR)\s*/\s*\d+', ' ', text, flags=re.IGNORECASE)
-        cleaned = re.sub(r'[A-Za-z]\d{6,}', ' ', cleaned)
-        cleaned = re.sub(r'\d{12,}', ' ', cleaned)
-        candidates = re.findall(r'\b\d{10,15}\b', re.sub(r'\D', ' ', cleaned))
-        result = set()
-        for c in candidates:
-            normalized = TaggingService._normalize_phone(c)
-            if normalized and TaggingService._is_valid_phone(normalized):
-                result.add(normalized)
-        return list(result)
-
-    @staticmethod
-    def _extract_party_name(text: str) -> str | None:
-        """Extract likely party name from bank transaction description."""
-        if not text:
-            return None
-
-        text = ' '.join(text.split())
-
-        # UPI format: .../REF/NAME/BANK/...
-        m = re.search(r'UPI\w*\s*/\s*\w+\s*/\s*\w+\s*/\s*([^/]+?)\s*/', text)
-        if m:
-            name = m.group(1).strip()
-            if len(name) > 1:
-                return name
-
-        # NEFT format: ...*NAME (last asterisk segment)
-        m = re.search(r'\*\s*([A-Za-z\s]+?)(?:\s+\d+\s*|\s*$)', text)
-        if m:
-            name = m.group(1).strip()
-            if len(name) > 3:
-                return name
-
-        # AS PER REQ / INVESTMENT format
-        m = re.search(r'OF\s+(?:Mr|Mrs|Ms)\.?\s+([A-Za-z\s]+?)(?:\s*\(|\s+\d|\s*$)', text)
-        if m:
-            name = m.group(1).strip()
-            if len(name) > 3:
-                return name
-
-        return None
-
-    @staticmethod
-    def _is_valid_phone(phone: str) -> bool:
-        """Validate that a digit string looks like a real phone number, not a ref number."""
-        if not phone:
-            return False
-        # Remove country code prefix for validation
-        n = phone
-        if len(n) == 12 and n.startswith('91'):
-            n = n[2:]
-        elif len(n) == 11 and n.startswith('0'):
-            n = n[1:]
-        # After normalization we should have 10 digits
-        if len(n) != 10:
-            return False
-        # Indian mobile numbers start with 6-9
-        if n[0] not in ('6', '7', '8', '9'):
-            return False
-        # Reject sequences that are likely ref numbers (all same digit, sequential)
-        if len(set(n)) <= 2:
-            return False
-        return True
-    
     def auto_tag_session(self, session_id: int, clients: List[Dict[str, Any]],
                          session_settings: Dict[str, Any] = None,
                          progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Tag]:
@@ -148,7 +50,7 @@ class TaggingService:
         common_words = self.config.get("broker_common_words") or []
         
         # Build phone number map from client list (exact match only, no fuzzy)
-        phone_map = self._build_phone_map(clients)
+        phone_map = build_phone_map(clients)
         
         # Detect recurring transactions
         recurring_map = self._detect_recurring(transactions, recurring_window)
@@ -285,7 +187,7 @@ class TaggingService:
         suspicious_keywords = self.config.get("suspicious_keywords") or []
         common_words = self.config.get("broker_common_words") or []
 
-        phone_map = self._build_phone_map(clients)
+        phone_map = build_phone_map(clients)
         recurring_map = self._detect_recurring(transactions, recurring_window)
 
         tx_dicts = [
