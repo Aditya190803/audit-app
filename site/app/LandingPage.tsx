@@ -10,7 +10,6 @@ import {
   FileText,
   Monitor,
   Lock,
-  ChevronDown,
   ExternalLink,
   Search,
   Settings,
@@ -25,12 +24,9 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
-type Platform = "windows" | "linux";
+type Platform = "windows";
 
 function detectOS(): Platform {
-  if (typeof navigator === "undefined") return "windows";
-  const ua = navigator.userAgent.toLowerCase();
-  if (ua.includes("linux")) return "linux";
   return "windows";
 }
 
@@ -44,42 +40,6 @@ function getPlatformInfo(version: string) {
           label: "Download for Windows (64-bit)",
           fileName: `Bank.Audit.App.Setup.${version}.exe`,
           format: ".exe installer",
-          available: true,
-        },
-        arm64: {
-          label: "Download for Windows (ARM64)",
-          fileName: `Bank.Audit.App.Setup.${version}-arm64.exe`,
-          format: ".exe installer",
-          available: true,
-        },
-      },
-    },
-    linux: {
-      name: "Linux",
-      icon: (
-        <svg
-          className="h-5 w-5"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.5}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M12 2C9.24 2 7 5.58 7 10c0 2.05.5 3.9 1.3 5.32C7.06 16.55 5 17.64 5 19.5 5 21.43 7.24 22 10 22h4c2.76 0 5-.57 5-2.5 0-1.86-2.06-2.95-3.3-4.18C16.5 13.9 17 12.05 17 10c0-4.42-2.24-8-5-8z" />
-        </svg>
-      ),
-      downloads: {
-        x64: {
-          label: "Download for Linux (64-bit)",
-          fileName: `Bank.Audit.App-${version}.AppImage`,
-          format: ".AppImage",
-          available: true,
-        },
-        arm64: {
-          label: "Download for Linux (ARM64)",
-          fileName: `Bank.Audit.App-${version}-arm64.AppImage`,
-          format: ".AppImage",
           available: true,
         },
       },
@@ -133,7 +93,7 @@ const workflowSteps = [
   { title: "Export", detail: "One-click audit workpaper" },
 ];
 
-const allPlatforms: Platform[] = ["windows", "linux"];
+const allPlatforms: Platform[] = [];
 
 function getManifestPath(yaml: string): string | null {
   const pathMatch = yaml.match(/^path:\s*(.+)$/m);
@@ -445,7 +405,6 @@ interface LandingPageProps {
 
 export default function LandingPage({ initialVersion }: LandingPageProps) {
   const [detectedOS, setDetectedOS] = useState<Platform>("windows");
-  const [showAllPlatforms, setShowAllPlatforms] = useState(false);
   const [appVersion, setAppVersion] = useState(initialVersion);
   const [platforms, setPlatforms] = useState(() => getPlatformInfo(initialVersion));
   const { ref: heroRefElement, inView: heroInView } = useInView(0.1);
@@ -575,19 +534,8 @@ export default function LandingPage({ initialVersion }: LandingPageProps) {
               )}
               <div className="flex items-center gap-3">
                 <span className="text-xs text-text-tertiary">
-                  v{appVersion} · Offline only
+                  v{appVersion} · Windows 64-bit · Offline only
                 </span>
-                {platforms[detectedOS].downloads.arm64.available && (
-                  <>
-                     <span className="text-xs text-text-tertiary">·</span>
-                     <a
-                       href={`/releases/${platforms[detectedOS].downloads.arm64.fileName}`}
-                       className="text-xs text-text-tertiary hover:text-primary transition-colors cursor-pointer"
-                     >
-                       ARM64 version
-                     </a>
-                  </>
-                )}
               </div>
             </div>
           </div>
@@ -688,78 +636,12 @@ export default function LandingPage({ initialVersion }: LandingPageProps) {
                     64-bit Installer — Coming Soon
                   </span>
                 )}
-                {platforms[detectedOS].downloads.arm64.available && (
-                  <a
-                    href={`/releases/${platforms[detectedOS].downloads.arm64.fileName}`}
-                    className="inline-flex w-full items-center justify-center gap-1.5 px-4 py-1.5 text-xs font-medium text-text-secondary hover:text-primary transition-colors cursor-pointer"
-                  >
-                    Also available for ARM64
-                    <ExternalLink className="h-3 w-3" strokeWidth={2} />
-                  </a>
-                )}
+
               </div>
             </div>
           </div>
 
-          {/* Other platforms */}
-          <div className="mt-4 text-center">
-            <button
-              onClick={() => setShowAllPlatforms(!showAllPlatforms)}
-              className="inline-flex items-center gap-1 text-xs text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer"
-            >
-              Other platforms
-              <ChevronDown
-                className={`h-3 w-3 transition-transform duration-200 ${showAllPlatforms ? "rotate-180" : ""}`}
-                strokeWidth={2}
-              />
-            </button>
 
-            {showAllPlatforms && (
-              <div className="mt-4 flex flex-wrap justify-center gap-4 animate-fade-in-up">
-                {allPlatforms
-                  .filter((p) => p !== detectedOS)
-                  .map((p) => {
-                    const plat = platforms[p];
-                    return (
-                      <div
-                        key={p}
-                        className="rounded-[var(--radius-lg)] border border-border bg-surface p-5 text-center min-w-[200px]"
-                      >
-                        <div className="mx-auto flex h-10 w-10 items-center justify-center text-text-tertiary bg-surface-hover rounded-md">
-                          {plat.icon}
-                        </div>
-                        <p className="mt-2 text-sm font-semibold text-text-primary">{plat.name}</p>
-                        <div className="mt-3 flex flex-col gap-1.5">
-                          {plat.downloads.x64.available ? (
-                            <a
-                              href={`/releases/${plat.downloads.x64.fileName}`}
-                              className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-primary hover:bg-primary-bg transition-colors cursor-pointer"
-                            >
-                              <Download className="h-3.5 w-3.5" />
-                              64-bit
-                              <ExternalLink className="h-2.5 w-2.5" strokeWidth={2} />
-                            </a>
-                          ) : (
-                            <span className="text-xs text-text-tertiary">
-                              64-bit — Coming soon
-                            </span>
-                          )}
-                          {plat.downloads.arm64.available && (
-                            <a
-                              href={`/releases/${plat.downloads.arm64.fileName}`}
-                              className="inline-flex items-center justify-center gap-1 px-3 py-1 rounded-md text-[11px] text-text-tertiary hover:text-primary transition-colors cursor-pointer"
-                            >
-                              ARM64
-                              <ExternalLink className="h-2.5 w-2.5" strokeWidth={2} />
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
-            )}
-          </div>
 
         </div>
       </section>

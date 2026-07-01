@@ -10,17 +10,8 @@ parameters:
     type: string
     default: ""
 
-# ── Shared command: Node + Bun + Python ──────────────────────
+# ── Shared command: Node + Bun + Python (Windows) ─────────────
 commands:
-  setup-bun:
-    steps:
-      - run:
-          name: Install Bun
-          command: |
-            curl -fsSL https://bun.sh/install | bash
-            echo 'export BUN_INSTALL="$HOME/.bun"' >> $BASH_ENV
-            echo 'export PATH="$BUN_INSTALL/bin:$PATH"' >> $BASH_ENV
-
   setup-bun-windows:
     steps:
       - run:
@@ -31,17 +22,6 @@ commands:
             $bunBin = "$env:USERPROFILE\.bun\bin"
             $env:Path = "$bunBin;" + $env:Path
             [System.Environment]::SetEnvironmentVariable('Path', $env:Path, 'User')
-
-  ensure-bun-path:
-    steps:
-      - run:
-          name: Ensure Bun is on PATH
-          command: |
-            if [ -f "$BASH_ENV" ]; then
-              # shellcheck disable=SC1090
-              source "$BASH_ENV"
-            fi
-            command -v bun
 
   ensure-bun-path-windows:
     steps:
@@ -55,15 +35,6 @@ commands:
             }
             $env:Path = "$bunBin;" + $env:Path
             Get-Command bun
-
-  install-deps:
-    steps:
-      - setup-bun
-      - run:
-          name: Install frontend dependencies
-          command: |
-            source "$BASH_ENV"
-            bun install --frozen-lockfile
 
   install-deps-windows:
     steps:
@@ -122,7 +93,6 @@ jobs:
           name: Ensure Python 3.12
           shell: powershell.exe
           command: |
-            # Use pre-installed Python or install via Chocolatey (more reliable on CircleCI)
             if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
               choco install python312 -y
             }
@@ -145,7 +115,7 @@ jobs:
             $env:LICENSE_CHECK_URL = "https://the-ska-auditing-app.vercel.app/api/license"
             bun run verify:prod
       - run:
-          name: Build Windows installer
+          name: Build Windows installer (64-bit only)
           shell: powershell.exe
           command: |
             $env:Path = "$env:USERPROFILE\.bun\bin;" + $env:Path
@@ -165,142 +135,6 @@ jobs:
           paths:
             - out/release/win
 
-  build-macos-arm64:
-    macos:
-      xcode: "16.4.0"
-    resource_class: m4pro.medium
-    environment:
-      ALLOW_UNSIGNED_RELEASE: "1"
-      RELEASE_PLATFORM: mac
-      HOMEBREW_NO_AUTO_UPDATE: "1"
-    steps:
-      - attach_workspace:
-          at: .
-      - install-deps
-      - run:
-          name: Create Python venv & install deps
-          command: |
-            python3 -m venv .venv
-            .venv/bin/python -m pip install --upgrade pip
-            .venv/bin/python -m pip install -r backend/requirements.txt pytest pyinstaller
-      - ensure-bun-path
-      - run:
-          name: Production verification
-          command: |
-            source "$BASH_ENV"
-            export PYTHON=".venv/bin/python"
-            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$CIRCLE_TAG"
-            export LICENSE_CHECK_URL="https://the-ska-auditing-app.vercel.app/api/license"
-            bun run verify:prod
-      - run:
-          name: Build macOS arm64 (Apple Silicon)
-          command: |
-            source "$BASH_ENV"
-            export GH_TOKEN="$GITHUB_TOKEN"
-            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$CIRCLE_TAG"
-            bun run package:ci:mac:arm64
-      - run:
-          name: Stage artifacts for workspace (mac-arm64)
-          command: |
-            mkdir -p out/release/mac-arm64
-            cp -r out/dist/* out/release/mac-arm64/
-      - store_artifacts:
-          path: out/dist
-      - persist_to_workspace:
-          root: .
-          paths:
-            - out/release/mac-arm64
-
-  build-macos-x64:
-    macos:
-      xcode: "16.4.0"
-    resource_class: m4pro.medium
-    environment:
-      ALLOW_UNSIGNED_RELEASE: "1"
-      RELEASE_PLATFORM: mac
-      HOMEBREW_NO_AUTO_UPDATE: "1"
-    steps:
-      - attach_workspace:
-          at: .
-      - install-deps
-      - run:
-          name: Create Python venv & install deps
-          command: |
-            python3 -m venv .venv
-            .venv/bin/python -m pip install --upgrade pip
-            .venv/bin/python -m pip install -r backend/requirements.txt pytest pyinstaller
-      - ensure-bun-path
-      - run:
-          name: Production verification
-          command: |
-            source "$BASH_ENV"
-            export PYTHON=".venv/bin/python"
-            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$CIRCLE_TAG"
-            export LICENSE_CHECK_URL="https://the-ska-auditing-app.vercel.app/api/license"
-            bun run verify:prod
-      - run:
-          name: Build macOS x64 (Intel — cross-compile)
-          command: |
-            source "$BASH_ENV"
-            export GH_TOKEN="$GITHUB_TOKEN"
-            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$CIRCLE_TAG"
-            bun run package:ci:mac:x64
-      - run:
-          name: Stage artifacts for workspace (mac-x64)
-          command: |
-            mkdir -p out/release/mac-x64
-            cp -r out/dist/* out/release/mac-x64/
-      - store_artifacts:
-          path: out/dist
-      - persist_to_workspace:
-          root: .
-          paths:
-            - out/release/mac-x64
-
-  build-linux:
-    docker:
-      - image: cimg/python:3.12-node
-    environment:
-      ALLOW_UNSIGNED_RELEASE: "1"
-      RELEASE_PLATFORM: linux
-    steps:
-      - attach_workspace:
-          at: .
-      - install-deps
-      - run:
-          name: Create Python venv & install deps
-          command: |
-            python -m venv .venv
-            .venv/bin/python -m pip install --upgrade pip
-            .venv/bin/python -m pip install -r backend/requirements.txt pytest pyinstaller
-      - ensure-bun-path
-      - run:
-          name: Production verification
-          command: |
-            source "$BASH_ENV"
-            export PYTHON=".venv/bin/python"
-            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$CIRCLE_TAG"
-            export LICENSE_CHECK_URL="https://the-ska-auditing-app.vercel.app/api/license"
-            bun run verify:prod
-      - run:
-          name: Build Linux AppImage
-          command: |
-            source "$BASH_ENV"
-            export GH_TOKEN="$GITHUB_TOKEN"
-            export UPDATE_FEED_URL="https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/download/$CIRCLE_TAG"
-            bun run package:ci:linux
-      - run:
-          name: Stage artifacts for workspace (linux)
-          command: |
-            mkdir -p out/release/linux
-            cp -r out/dist/* out/release/linux/
-      - store_artifacts:
-          path: out/dist
-      - persist_to_workspace:
-          root: .
-          paths:
-            - out/release/linux
-
   publish:
     docker:
       - image: cimg/base:stable
@@ -311,11 +145,9 @@ jobs:
           name: Consolidate platform artifacts
           command: |
             mkdir -p out/dist
-            for dir in out/release/*/; do
-              if [ -d "$dir" ]; then
-                cp -r "$dir"* out/dist/
-              fi
-            done
+            if [ -d "out/release/win" ]; then
+              cp -r out/release/win/* out/dist/
+            fi
             echo "=== Consolidated artifacts ==="
             ls -la out/dist/
       - gh/setup
@@ -331,8 +163,7 @@ jobs:
 
             mapfile -t assets < <(find out/dist -maxdepth 1 -type f ! -name '.*' | sort)
             if [ "${#assets[@]}" -eq 0 ]; then
-              echo "No release files in out/dist (only dirs or empty)." >&2
-              ls -la out/dist/ || true
+              echo "No release files in out/dist." >&2
               exit 1
             fi
             echo "Uploading ${#assets[@]} file(s):"
@@ -369,20 +200,8 @@ workflows:
             tags:
               only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
 
-      # macOS builds temporarily removed for this release
-      # (hitting CircleCI macOS concurrency limit)
-      # Re-enable by restoring the two build-macos-* entries + updating publish requires
-      # - build-macos-arm64: ...
-      # - build-macos-x64: ...
-
-      - build-linux:
-          requires: [validate]
-          filters:
-            tags:
-              only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
-
       - publish:
-          requires: [build-windows, build-linux]
+          requires: [build-windows]
           context: [github-release]
           filters:
             tags:

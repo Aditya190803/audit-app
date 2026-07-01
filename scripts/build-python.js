@@ -68,6 +68,7 @@ function main() {
     '--hidden-import', 'backend.migrations',
     '--add-data', addDataArg(path.join(__dirname, '..', 'backend', 'alembic.ini'), 'backend'),
     '--add-data', addDataArg(path.join(__dirname, '..', 'backend', 'alembic'), path.join('backend', 'alembic')),
+    '--add-data', addDataArg(path.join(__dirname, '..', 'backend', 'brokers_list.py'), 'backend'),
     '--hidden-import', 'backend.services.config_service',
     '--hidden-import', 'backend.services.pdf_service',
     '--hidden-import', 'backend.services.csv_service',
