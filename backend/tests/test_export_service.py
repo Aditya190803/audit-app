@@ -16,6 +16,12 @@ from backend.services.export_service import ExportService
 
 
 class ExportServiceTests(unittest.TestCase):
+    def test_normalize_client_code_strips_leading_quote(self):
+        from backend.services.csv_service import CSVService
+        self.assertEqual(CSVService.normalize_client_code("'S2052"), "S2052")
+        self.assertEqual(CSVService.normalize_client_code("'CE01943"), "CE01943")
+        self.assertEqual(CSVService.normalize_client_code("CE01943"), "CE01943")
+
     def setUp(self):
         engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(engine)
@@ -107,7 +113,7 @@ class ExportServiceTests(unittest.TestCase):
                     Tag(
                         transaction_id=client_tx.id,
                         tag_type="client",
-                        reason="Matched client list",
+                        reason="Fuzzy match: 'CLIENT ONE' (score: 0.95)",
                     ),
                     Tag(
                         transaction_id=broker_tx.id,
@@ -127,6 +133,7 @@ class ExportServiceTests(unittest.TestCase):
                 [client_tx, broker_tx, suspicious_tx],
                 output_xlsx,
                 session.name,
+                client_name_to_code={"CLIENT ONE": "C001"},
             )
 
             wb = load_workbook(output_xlsx)
@@ -156,6 +163,8 @@ class ExportServiceTests(unittest.TestCase):
 
                 ws_client = wb["Client"]
                 max_r_client = ws_client.max_row
+                self.assertEqual(ws_client["G1"].value, "Client Code")
+                self.assertEqual(ws_client["G2"].value, "C001")
                 self.assertEqual(ws_client[f"B{max_r_client - 1}"].value, 1)
 
                 ws_broker = wb["Broker"]

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from backend.database import get_db
 from backend.services.session_service import SessionService
+from backend.services.csv_service import CSVService
 from backend.services.export_service import ExportService
 from backend.security import is_relative_to, verify_export_path_token
 import json
@@ -54,6 +55,26 @@ def export_excel(session_id: int, export_type: str = "all", file_path: Optional[
     if not file_path:
         file_path = f"export_{session_id}_{export_type}.xlsx"
     output_path = _ensure_export_path(file_path, export_path_token)
+    client_name_to_code = {}
+    settings = session.settings_snapshot or {}
+    code_column = settings.get("client_code_column")
+    sheet_name = settings.get("client_sheet_name")
+    name_column = settings.get("client_name_column")
+    if session.csv_path and os.path.exists(session.csv_path):
+        try:
+            csv_service = CSVService()
+            clients = csv_service.parse_client_list(
+                session.csv_path, sheet_name, name_column, False
+            )
+            client_name_to_code = csv_service.name_to_client_code_map(clients, code_column)
+        except Exception as e:
+            print(f"[export] Client code map skipped: {e}")
+
     export_service = ExportService(db)
-    export_service.export_excel(transactions, output_path, session.name or "Audit")
+    export_service.export_excel(
+        transactions,
+        output_path,
+        session.name or "Audit",
+        client_name_to_code=client_name_to_code or None,
+    )
     return {"file_path": output_path, "count": len(transactions)}

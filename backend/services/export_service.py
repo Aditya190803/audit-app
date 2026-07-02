@@ -1,4 +1,5 @@
 import re
+from typing import Dict, Optional
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, Side
@@ -7,6 +8,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from sqlalchemy.orm import Session
 
 from backend.models import Tag, Transaction
+from backend.services.csv_service import CSVService
 
 
 class ExportService:
@@ -18,6 +20,7 @@ class ExportService:
         transactions: list[Transaction],
         file_path: str,
         session_name: str = "Audit",
+        client_name_to_code: Optional[Dict[str, str]] = None,
     ) -> str:
         """Export transactions to a formatted multi-sheet Excel workbook."""
         wb = Workbook()
@@ -43,7 +46,12 @@ class ExportService:
             ws = wb.active if index == 0 else wb.create_sheet()
             ws.title = title
             self._write_transaction_sheet(
-                ws, sheet_transactions, all_tags, title, session_name
+                ws,
+                sheet_transactions,
+                all_tags,
+                title,
+                session_name,
+                client_name_to_code if title == "Client" else None,
             )
             ws.sheet_properties.tabColor = {
                 "Account Transactions": "366092",
@@ -65,6 +73,7 @@ class ExportService:
         tags_by_transaction: dict[int, list[Tag]],
         title: str,
         session_name: str,
+        client_name_to_code: Optional[Dict[str, str]] = None,
     ) -> None:
         headers = [
             "ID",
@@ -73,13 +82,17 @@ class ExportService:
             "Credit",
             "Description",
             "Party Name",
+        ]
+        if client_name_to_code is not None:
+            headers.append("Client Code")
+        headers.extend([
             "Payment Method",
             "Tags",
             "Tag Reasons",
             "Notes",
             "PDF File",
             "Page",
-        ]
+        ])
         header_font = Font(bold=True)
         subtle_side = Side(style="thin", color="D9E2EC")
         thin_border = Border(
@@ -103,6 +116,16 @@ class ExportService:
             tag_types = [t.tag_type for t in tags]
             tag_reasons = [t.reason for t in tags]
 
+            client_code = ""
+            if client_name_to_code is not None:
+                for t in tags:
+                    if t.tag_type == "client" and t.reason:
+                        matched = self._matched_client_name_from_reason(t.reason)
+                        if matched:
+                            key = CSVService.normalize_client_name_key(matched)
+                            client_code = client_name_to_code.get(key, "")
+                        break
+
             values = [
                 tx.id,
                 tx.date,
@@ -110,17 +133,25 @@ class ExportService:
                 tx.amount if tx.amount and tx.amount > 0 else "",
                 tx.description,
                 tx.party_name,
+            ]
+            if client_name_to_code is not None:
+                values.append(client_code)
+            values.extend([
                 tx.payment_method,
                 ", ".join(tag_types),
                 "; ".join(reason for reason in tag_reasons if reason),
                 tx.user_notes,
                 tx.pdf_filename,
                 tx.page_number,
-            ]
+            ])
 
             for col, value in enumerate(values, 1):
                 cell = ws.cell(row=row, column=col, value=value)
-                cell.alignment = Alignment(vertical="top", wrap_text=col in {5, 9, 10})
+                desc_col = 5
+                wrap_cols = {desc_col, desc_col + 4, desc_col + 5}
+                if client_name_to_code is not None:
+                    wrap_cols = {desc_col, desc_col + 5, desc_col + 6}
+                cell.alignment = Alignment(vertical="top", wrap_text=col in wrap_cols)
                 cell.border = thin_border
 
         if not sorted_transactions:
@@ -187,6 +218,18 @@ class ExportService:
         for column in ("C", "D"):
             for cell in ws[column][header_row:]:
                 cell.number_format = "#,##0.00"
+
+    def _matched_client_name_from_reason(self, reason: str) -> Optional[str]:
+        m = re.search(r"Fuzzy match:\s*'([^']+)'", reason)
+        if m:
+            return m.group(1).strip()
+        m = re.search(r"Phone match:\s*\d+\s*->\s*'?([^'\[]+?)'?\s*(?:\[|$)", reason)
+        if m:
+            return m.group(1).strip()
+        m = re.search(r"'([^']+)'", reason)
+        if m:
+            return m.group(1).strip()
+        return None
 
     def _tags_by_transaction(
         self, transactions: list[Transaction]

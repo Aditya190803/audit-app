@@ -99,6 +99,57 @@ class CSVService:
         
         return clients
 
+    CLIENT_CODE_HEADER_KEYWORDS = (
+        'client code', 'client_code', 'client id', 'client_id', 'clientcode', 'clientid',
+    )
+
+    def _normalize_header(self, key: str) -> str:
+        return str(key).lower().strip().replace(' ', '_').replace('-', '_')
+
+    @staticmethod
+    def normalize_client_code(value: str) -> str:
+        """Strip Excel/text artifacts from client codes (leading ', spaces)."""
+        s = str(value).strip()
+        while s.startswith("'"):
+            s = s[1:].lstrip()
+        s = s.strip("'\" ")
+        return s
+
+    @staticmethod
+    def normalize_client_name_key(name: str) -> str:
+        return ' '.join(str(name).strip().split())
+
+    def _get_client_code_value(self, raw_data: dict, code_column: str | None = None) -> str | None:
+        if code_column and code_column in raw_data:
+            val = self.normalize_client_code(str(raw_data[code_column]))
+            if val and val.lower() not in ('nan', 'none', 'null'):
+                return val
+        for key in raw_data:
+            normalized = self._normalize_header(key)
+            if normalized in self.CLIENT_CODE_HEADER_KEYWORDS:
+                val = self.normalize_client_code(str(raw_data[key]))
+                if val and val.lower() not in ('nan', 'none', 'null'):
+                    return val
+            for kw in self.CLIENT_CODE_HEADER_KEYWORDS:
+                if kw.replace('_', '') in normalized.replace('_', ''):
+                    val = self.normalize_client_code(str(raw_data[key]))
+                    if val and val.lower() not in ('nan', 'none', 'null'):
+                        return val
+        return None
+
+    def name_to_client_code_map(
+        self, clients: List[Dict[str, Any]], code_column: str | None = None
+    ) -> Dict[str, str]:
+        out: Dict[str, str] = {}
+        for c in clients:
+            name = self.normalize_client_name_key(c.get('name') or '')
+            if not name:
+                continue
+            code = self._get_client_code_value(c.get('raw_data', {}), code_column)
+            if code:
+                out[name] = code
+        return out
+
     def _get_ap_code_value(self, raw_data: dict) -> str | None:
         for key in raw_data:
             normalized = str(key).lower().strip().replace(' ', '_').replace('-', '_')
