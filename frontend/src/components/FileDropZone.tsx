@@ -21,6 +21,7 @@ interface FileDropZoneProps {
       password?: string
       sheetName?: string
       nameColumn?: string
+      codeColumn?: string
       excludedBrokers?: string[]
       apCodes?: string[]
       bankName?: string
@@ -289,6 +290,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
         password?: string
         sheetName?: string
         nameColumn?: string
+        codeColumn?: string
         excludedBrokers?: string[]
         apCodes?: string[]
         bankName?: string
@@ -305,6 +307,9 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
       }
       if (clientList.nameColumn.trim()) {
         options.nameColumn = clientList.nameColumn.trim()
+      }
+      if (clientList.codeColumn.trim()) {
+        options.codeColumn = clientList.codeColumn.trim()
       }
       if (onFilesSelected) {
         onFilesSelected(pdfFiles, clientList.clientListFile, threshold, options)
@@ -341,8 +346,9 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
   }, [isProcessing, progressPercent])
 
   const getClientListLabel = (file: File) => {
-    if (file.name.endsWith('.csv')) return 'CSV'
-    if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) return 'Excel'
+    const name = file.name.toLowerCase()
+    if (name.endsWith('.csv')) return 'CSV'
+    if (name.endsWith('.xlsx') || name.endsWith('.xls')) return 'Excel'
     return 'Spreadsheet'
   }
 
@@ -380,6 +386,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
             dropzone={clientListDropzone}
             label="Client List"
             activeLabel="Drop file here"
+            selectedLabel={clientList.clientListFile ? clientList.clientListFile.name : undefined}
             helpText="CSV or Excel"
           />
         </div>
@@ -538,6 +545,35 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({ onFilesSelected, isP
               {clientList.detectedColumns.length > 0
                 ? 'Auto-detected from file. Select the column containing client names.'
                 : 'Enter the column name that contains client names.'}
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-[var(--text-primary)] mb-1.5">
+              Client Code Column
+            </label>
+            {clientList.detectedColumns.length > 0 ? (
+              <select
+                value={clientList.codeColumn}
+                onChange={(e) => clientList.setCodeColumn(e.target.value)}
+                className="input-field"
+              >
+                <option value="">None</option>
+                {clientList.detectedColumns.map((col) => (
+                  <option key={col} value={col}>{col}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                placeholder="e.g., Client Code, Client_Id"
+                value={clientList.codeColumn}
+                onChange={(e) => clientList.setCodeColumn(e.target.value)}
+                className="input-field"
+              />
+            )}
+            <p className="text-xs text-[var(--text-tertiary)] mt-1">
+              Optional. Auto-detected when possible. Shown on the Client sheet in Excel export.
             </p>
           </div>
         </div>
