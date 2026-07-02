@@ -99,6 +99,7 @@ export function useClientListPreview() {
       const cols = Array.from({ length: colCount }, (_, i) => `Column ${i + 1}`)
       setDetectedColumns(cols)
       setNameColumn(cols[0] ?? '')
+      setCodeColumn('')
       return
     }
     if (headerRow < csvFirstRows.length) {

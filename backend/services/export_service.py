@@ -116,6 +116,8 @@ class ExportService:
             tag_types = [t.tag_type for t in tags]
             tag_reasons = [t.reason for t in tags]
 
+            export_party = self._export_party_name(tags, tx.party_name)
+
             client_code = ""
             if client_name_to_code is not None:
                 for t in tags:
@@ -125,6 +127,8 @@ class ExportService:
                             key = CSVService.normalize_client_name_key(matched)
                             client_code = client_name_to_code.get(key, "")
                         break
+                if client_code:
+                    client_code = CSVService.normalize_client_code(client_code)
 
             values = [
                 tx.id,
@@ -132,7 +136,7 @@ class ExportService:
                 -tx.amount if tx.amount and tx.amount < 0 else "",
                 tx.amount if tx.amount and tx.amount > 0 else "",
                 tx.description,
-                tx.party_name,
+                export_party,
             ]
             if client_name_to_code is not None:
                 values.append(client_code)
@@ -219,17 +223,61 @@ class ExportService:
             for cell in ws[column][header_row:]:
                 cell.number_format = "#,##0.00"
 
+    def _export_party_name(
+        self, tags: list[Tag], fallback: Optional[str]
+    ) -> Optional[str]:
+        if not tags:
+            return fallback
+        for t in tags:
+            if not t.reason:
+                continue
+            if t.tag_type == "client":
+                name = self._matched_client_name_from_reason(t.reason)
+                if name:
+                    return name
+            elif t.tag_type == "broker":
+                name = self._matched_broker_name_from_reason(t.reason)
+                if name:
+                    return name
+        for t in tags:
+            if t.tag_type == "suspicious" and t.reason:
+                name = self._party_from_suspicious_reason(t.reason)
+                if name:
+                    return name
+        if any(t.tag_type == "suspicious" for t in tags):
+            return ""
+        return fallback
+
     def _matched_client_name_from_reason(self, reason: str) -> Optional[str]:
         m = re.search(r"Fuzzy match:\s*'([^']+)'", reason)
         if m:
             return m.group(1).strip()
-        m = re.search(r"Phone match:\s*\d+\s*->\s*'?([^'\[]+?)'?\s*(?:\[|$)", reason)
+        m = re.search(r"Phone match:\s*\d+\s*->\s*'?([^'\[]+?)'?", reason)
         if m:
-            return m.group(1).strip()
-        m = re.search(r"'([^']+)'", reason)
+            return m.group(1).strip().strip("'\"")
+        return None
+
+    def _matched_broker_name_from_reason(self, reason: str) -> Optional[str]:
+        m = re.search(r"Broker match:\s*'([^']+)'", reason)
         if m:
             return m.group(1).strip()
         return None
+
+    _SUSPICIOUS_PARTY_SKIP = frozenset(
+        {"mr", "mr.", "ms", "ms.", "mrs", "mrs.", "dr", "dr.", "same party"}
+    )
+
+    def _party_from_suspicious_reason(self, reason: str) -> Optional[str]:
+        m = re.search(r"\bwith\s+([^:]+):", reason, re.IGNORECASE)
+        if not m:
+            return None
+        party = re.sub(r"\s+", " ", m.group(1).strip())
+        if not party or party.lower() in self._SUSPICIOUS_PARTY_SKIP:
+            return None
+        # ponytail: skip 1–4 char UPI fragments (Gene, LALI, hars)
+        if len(party) <= 4 and party.isalpha():
+            return None
+        return party
 
     def _tags_by_transaction(
         self, transactions: list[Transaction]

@@ -125,13 +125,9 @@ class CSVService:
             if val and val.lower() not in ('nan', 'none', 'null'):
                 return val
         for key in raw_data:
-            normalized = self._normalize_header(key)
-            if normalized in self.CLIENT_CODE_HEADER_KEYWORDS:
-                val = self.normalize_client_code(str(raw_data[key]))
-                if val and val.lower() not in ('nan', 'none', 'null'):
-                    return val
+            normalized = self._normalize_header(key).replace('_', '')
             for kw in self.CLIENT_CODE_HEADER_KEYWORDS:
-                if kw.replace('_', '') in normalized.replace('_', ''):
+                if kw.replace('_', '') in normalized:
                     val = self.normalize_client_code(str(raw_data[key]))
                     if val and val.lower() not in ('nan', 'none', 'null'):
                         return val
