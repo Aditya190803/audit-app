@@ -125,6 +125,7 @@ export async function parseFiles(
     password?: string
     sheetName?: string
     nameColumn?: string
+    codeColumn?: string
     excludedBrokers?: string[]
     apCodes?: string[]
     bankName?: string
@@ -142,6 +143,7 @@ export async function parseFiles(
   if (options.password) formData.append('password', options.password)
   if (options.sheetName) formData.append('sheet_name', options.sheetName)
   if (options.nameColumn) formData.append('name_column', options.nameColumn)
+  if (options.codeColumn) formData.append('code_column', options.codeColumn)
   if (options.bankName) formData.append('bank_name', options.bankName)
   if (options.progressId) formData.append('progress_id', options.progressId)
   if (options.excludedBrokers && options.excludedBrokers.length > 0) {

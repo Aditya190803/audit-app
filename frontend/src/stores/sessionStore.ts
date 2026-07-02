@@ -24,6 +24,7 @@ interface SessionState {
       password?: string
       sheetName?: string
       nameColumn?: string
+      codeColumn?: string
       excludedBrokers?: string[]
       apCodes?: string[]
       bankName?: string

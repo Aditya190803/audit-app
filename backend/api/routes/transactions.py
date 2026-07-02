@@ -233,6 +233,7 @@ async def parse_files(
     password: Optional[str] = Form(None),
     sheet_name: Optional[str] = Form(None),
     name_column: Optional[str] = Form(None),
+    code_column: Optional[str] = Form(None),
     excluded_brokers: Optional[str] = Form(None),
     ap_codes: Optional[str] = Form(None),
     bank_name: Optional[str] = Form(None),
@@ -394,6 +395,12 @@ async def parse_files(
     config = ConfigService(db)
     settings = config.get_all()
     settings['suspicious_threshold'] = threshold
+    if name_column:
+        settings['client_name_column'] = name_column
+    if code_column:
+        settings['client_code_column'] = code_column
+    if sheet_name:
+        settings['client_sheet_name'] = sheet_name
     
     _set_parse_progress(progress_id, 62, "Creating audit session...", "creating_session")
     await asyncio.sleep(0)  # yield to event loop so SSE can send this update

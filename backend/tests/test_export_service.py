@@ -16,6 +16,117 @@ from backend.services.export_service import ExportService
 
 
 class ExportServiceTests(unittest.TestCase):
+    def test_normalize_client_code_strips_leading_quote(self):
+        from backend.services.csv_service import CSVService
+        self.assertEqual(CSVService.normalize_client_code("'S2052"), "S2052")
+        self.assertEqual(CSVService.normalize_client_code("'CE01943"), "CE01943")
+        self.assertEqual(CSVService.normalize_client_code("CE01943"), "CE01943")
+
+    def test_export_party_name_from_client_tag_not_parser_party(self):
+        svc = ExportService(None)
+        tags = [
+            Tag(
+                transaction_id=1,
+                tag_type="client",
+                reason="Fuzzy match: 'BHAVINI C SHAH' (score: 1.0)",
+            )
+        ]
+        self.assertEqual(
+            svc._export_party_name(tags, "ICIC"),
+            "BHAVINI C SHAH",
+        )
+
+    def test_export_route_fills_client_code_from_session_csv(self):
+        import csv
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_path = os.path.join(tmpdir, "clients.csv")
+            with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f)
+                w.writerow(["CLIENTCODE", "CLIENTNAME"])
+                w.writerow(["'CE01943", "BHAVINI C SHAH"])
+
+            output_xlsx = os.path.join(tmpdir, "exports", "audit.xlsx")
+
+            engine = create_engine("sqlite:///:memory:")
+            Base.metadata.create_all(engine)
+            db = sessionmaker(bind=engine)()
+            try:
+                session = AuditSession(
+                    name="ICIC",
+                    csv_path=csv_path,
+                    settings_snapshot={
+                        "client_name_column": "CLIENTNAME",
+                        "client_code_column": "CLIENTCODE",
+                    },
+                )
+                db.add(session)
+                db.commit()
+
+                tx = Transaction(
+                    session_id=session.id,
+                    date="2025-03-16",
+                    amount=-10000,
+                    description="IMPS/P2A/.../BHAVINI C SHAH",
+                    party_name="ICIC",
+                    payment_method="IMPS",
+                    page_number=2,
+                )
+                db.add(tx)
+                db.commit()
+                db.refresh(tx)
+                db.add(
+                    Tag(
+                        transaction_id=tx.id,
+                        tag_type="client",
+                        reason="Fuzzy match: 'BHAVINI C SHAH' (score: 1.0)",
+                    )
+                )
+                db.commit()
+
+                with patch.object(export_route, "EXPORT_DIR", os.path.join(tmpdir, "exports")):
+                    resp = export_route.export_excel(
+                        session.id, file_path="audit.xlsx", transaction_ids=None, db=db
+                    )
+
+                wb = load_workbook(resp["file_path"])
+                try:
+                    ws = wb["Client"]
+                    self.assertEqual(ws["G2"].value, "CE01943")
+                    self.assertEqual(ws["F2"].value, "BHAVINI C SHAH")
+                finally:
+                    wb.close()
+            finally:
+                db.close()
+
+    def test_export_party_name_empty_for_suspicious_junk_reason(self):
+        svc = ExportService(None)
+        tags = [
+            Tag(
+                transaction_id=1,
+                tag_type="suspicious",
+                reason="Recurring debit of ₹300.00 with MR.: 12 matching transactions",
+            )
+        ]
+        self.assertEqual(svc._export_party_name(tags, "MR."), "")
+
+    def test_export_party_name_from_suspicious_reason_when_usable(self):
+        svc = ExportService(None)
+        tags = [
+            Tag(
+                transaction_id=1,
+                tag_type="suspicious",
+                reason=(
+                    "Recurring debit of ₹8,022.00 with Loan Recovery For795000021260: "
+                    "6 matching transactions"
+                ),
+            )
+        ]
+        self.assertEqual(
+            svc._export_party_name(tags, "ICIC"),
+            "Loan Recovery For795000021260",
+        )
+
     def setUp(self):
         engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(engine)
@@ -107,7 +218,7 @@ class ExportServiceTests(unittest.TestCase):
                     Tag(
                         transaction_id=client_tx.id,
                         tag_type="client",
-                        reason="Matched client list",
+                        reason="Fuzzy match: 'CLIENT ONE' (score: 0.95)",
                     ),
                     Tag(
                         transaction_id=broker_tx.id,
@@ -127,6 +238,7 @@ class ExportServiceTests(unittest.TestCase):
                 [client_tx, broker_tx, suspicious_tx],
                 output_xlsx,
                 session.name,
+                client_name_to_code={"CLIENT ONE": "C001"},
             )
 
             wb = load_workbook(output_xlsx)
@@ -156,6 +268,8 @@ class ExportServiceTests(unittest.TestCase):
 
                 ws_client = wb["Client"]
                 max_r_client = ws_client.max_row
+                self.assertEqual(ws_client["G1"].value, "Client Code")
+                self.assertEqual(ws_client["G2"].value, "C001")
                 self.assertEqual(ws_client[f"B{max_r_client - 1}"].value, 1)
 
                 ws_broker = wb["Broker"]
@@ -233,8 +347,8 @@ class ExportServiceTests(unittest.TestCase):
                 ws = wb["Suspicious - Recurring"]
                 max_r = ws.max_row
                 self.assertEqual(ws[f"B{max_r - 1}"].value, 3)
-                self.assertEqual(ws["F2"].value, "ALPHA CLIENT")
-                self.assertEqual(ws["F3"].value, "ALPHA CLIENT")
-                self.assertEqual(ws["F4"].value, "BETA CLIENT")
+                self.assertIn(ws["F2"].value, (None, ""))
+                self.assertIn(ws["F3"].value, (None, ""))
+                self.assertIn(ws["F4"].value, (None, ""))
             finally:
                 wb.close()

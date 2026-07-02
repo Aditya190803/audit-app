@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import * as XLSX from 'xlsx-js-style'
+import { bestClientCodeColumnMatch } from '../lib/clientCodeColumn'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -14,13 +15,14 @@ const AP_CODE_KEYWORDS = ['ap code', 'ap_code', 'apcode', 'ap codes', 'ap_codes'
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 export function isExcel(file: File): boolean {
-  return file.name.endsWith('.xlsx') || file.name.endsWith('.xls') ||
+  const name = file.name.toLowerCase()
+  return name.endsWith('.xlsx') || name.endsWith('.xls') ||
     file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
     file.type === 'application/vnd.ms-excel'
 }
 
 export function isCsv(file: File): boolean {
-  return file.name.endsWith('.csv') || file.type === 'text/csv'
+  return file.name.toLowerCase().endsWith('.csv') || file.type === 'text/csv'
 }
 
 export function bestApCodeColumnMatch(headers: string[]): string | null {
@@ -72,6 +74,7 @@ export function useClientListPreview() {
   const [headerRow, setHeaderRow] = useState<number>(0)
   const [csvFirstRows, setCsvFirstRows] = useState<string[][]>([])
   const [nameColumn, setNameColumn] = useState('')
+  const [codeColumn, setCodeColumn] = useState('')
   const [detectedColumns, setDetectedColumns] = useState<string[]>([])
   const [excelWorkbook, setExcelWorkbook] = useState<XLSX.WorkBook | null>(null)
 
@@ -81,6 +84,7 @@ export function useClientListPreview() {
     setSheetName('')
     setSheetNames([])
     setNameColumn('')
+    setCodeColumn('')
     setDetectedColumns([])
     setCsvFirstRows([])
     setHeaderRow(0)
@@ -95,6 +99,7 @@ export function useClientListPreview() {
       const cols = Array.from({ length: colCount }, (_, i) => `Column ${i + 1}`)
       setDetectedColumns(cols)
       setNameColumn(cols[0] ?? '')
+      setCodeColumn('')
       return
     }
     if (headerRow < csvFirstRows.length) {
@@ -102,6 +107,8 @@ export function useClientListPreview() {
       setDetectedColumns(headers)
       const best = bestNameColumnMatch(headers)
       if (best) setNameColumn(best)
+      const codeBest = bestClientCodeColumnMatch(headers)
+      setCodeColumn(codeBest || '')
     }
   }, [headerRow, csvFirstRows])
 
@@ -116,6 +123,8 @@ export function useClientListPreview() {
       setDetectedColumns(cols)
       const best = bestNameColumnMatch(cols)
       if (best) setNameColumn(best)
+      const codeBest = bestClientCodeColumnMatch(cols)
+      setCodeColumn(codeBest || '')
     }
   }, [excelWorkbook, sheetName])
 
@@ -174,6 +183,8 @@ export function useClientListPreview() {
               setDetectedColumns(cols)
               const best = bestNameColumnMatch(cols)
               if (best) setNameColumn(best)
+              const codeBest = bestClientCodeColumnMatch(cols)
+              setCodeColumn(codeBest || '')
             }
           }
         } catch (error) {
@@ -198,6 +209,7 @@ export function useClientListPreview() {
     headerRow, setHeaderRow,
     csvFirstRows,
     detectedColumns, nameColumn, setNameColumn,
+    codeColumn, setCodeColumn,
     excelWorkbook,
   }
 }
